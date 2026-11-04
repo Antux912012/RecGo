@@ -27,6 +27,7 @@ mkdir -p "${BUILD_DIR}/files/bin" \
          "${BUILD_DIR}/files/share/glib-2.0/schemas" \
          "${BUILD_DIR}/files/share/metainfo" \
          "${BUILD_DIR}/export/share/applications" \
+         "${BUILD_DIR}/export/share/metainfo" \
          "${BUILD_DIR}/export/share/icons/hicolor/scalable/apps" \
          "${BUILD_DIR}/export/share/icons/hicolor/512x512/apps" \
          "${BUILD_DIR}/export/share/icons/hicolor/256x256/apps" \
@@ -36,7 +37,15 @@ mkdir -p "${BUILD_DIR}/files/bin" \
          "${BUILD_DIR}/export/share/icons/hicolor/32x32/apps"
 
 cp -f "${PROJECT_DIR}/flatpak-metadata.ini" "${BUILD_DIR}/metadata"
-install -Dm755 "${PROJECT_DIR}/target/debug/recgo" "${BUILD_DIR}/files/bin/recgo"
+
+if [[ -f "${PROJECT_DIR}/target/release/recgo" ]]; then
+    echo "==> Using optimized release binary..."
+    install -Dm755 "${PROJECT_DIR}/target/release/recgo" "${BUILD_DIR}/files/bin/recgo"
+else
+    echo "==> Using debug binary..."
+    install -Dm755 "${PROJECT_DIR}/target/debug/recgo" "${BUILD_DIR}/files/bin/recgo"
+fi
+
 install -Dm644 "${PROJECT_DIR}/data/io.github.antonio.RecGo.desktop.in" \
     "${BUILD_DIR}/files/share/applications/io.github.antonio.RecGo.desktop"
 install -Dm644 "${PROJECT_DIR}/data/io.github.antonio.RecGo.desktop.in" \
@@ -58,6 +67,8 @@ install -Dm644 "${PROJECT_DIR}/data/io.github.antonio.RecGo.gschema.xml" \
     "${BUILD_DIR}/files/share/glib-2.0/schemas/io.github.antonio.RecGo.gschema.xml"
 install -Dm644 "${PROJECT_DIR}/data/io.github.antonio.RecGo.metainfo.xml" \
     "${BUILD_DIR}/files/share/metainfo/io.github.antonio.RecGo.metainfo.xml"
+install -Dm644 "${PROJECT_DIR}/data/io.github.antonio.RecGo.metainfo.xml" \
+    "${BUILD_DIR}/export/share/metainfo/io.github.antonio.RecGo.metainfo.xml"
 
 if command -v glib-compile-schemas >/dev/null 2>&1; then
     glib-compile-schemas "${BUILD_DIR}/files/share/glib-2.0/schemas"

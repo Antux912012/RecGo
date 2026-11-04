@@ -65,6 +65,24 @@ const CAMERA_CSS: &str = r#"
     opacity: 0.4;
 }
 
+.camera-preview-btn {
+    background: linear-gradient(180deg, #303541 0%, #1e222a 100%);
+    color: #ffffff;
+    font-weight: 600;
+    border: 1.5px solid #4a5263;
+    padding: 6px 14px;
+    border-radius: 9999px;
+    transition: all 200ms ease;
+}
+.camera-preview-btn:hover:not(:disabled) {
+    background: linear-gradient(180deg, #3584e4 0%, #1c71d8 100%);
+    border-color: #62a0ea;
+    box-shadow: 0 0 12px rgba(53, 132, 228, 0.55);
+}
+.camera-preview-btn:disabled {
+    opacity: 0.4;
+}
+
 .camera-osd-badge {
     background: rgba(14, 18, 25, 0.88);
     border: 1.5px solid rgba(255, 255, 255, 0.14);
@@ -116,6 +134,7 @@ mod imp {
         pub is_recording: Cell<bool>,
         pub is_paused: Cell<bool>,
         pub mic_enabled: Cell<bool>,
+        pub selected_codec_index: Cell<usize>,
     }
 
     #[glib::object_subclass]
@@ -155,6 +174,15 @@ impl RecGoWindow {
         let toast_overlay = adw::ToastOverlay::new();
         let toolbar_view = adw::ToolbarView::new();
 
+        let (_gpu_mode, gpu_summary) = detect_gpu_acceleration();
+        let supported_codecs: Rc<Vec<CodecInfo>> = Rc::new(get_supported_codecs());
+        let default_codec_desc = supported_codecs
+            .first()
+            .map(|c| c.display_name.as_str())
+            .unwrap_or("H.264");
+        let status_label = gtk::Label::new(Some(&format!("Ready ({} | {})", gpu_summary, default_codec_desc)));
+        status_label.add_css_class("dim-label");
+
         // Top HeaderBar
         let header = adw::HeaderBar::new();
 
@@ -164,10 +192,6 @@ impl RecGoWindow {
         ]);
         source_dropdown.set_tooltip_text(Some("Select Capture Target"));
         header.pack_start(&source_dropdown);
-
-        let btn_select_screen = gtk::Button::with_label("Preview Desktop");
-        btn_select_screen.set_tooltip_text(Some("Choose Screen or Window for Live Preview"));
-        header.pack_start(&btn_select_screen);
 
         let layout_dropdown = gtk::DropDown::from_strings(&[
             "Desktop + Webcam PiP",
@@ -186,16 +210,6 @@ impl RecGoWindow {
         shape_dropdown.set_tooltip_text(Some("Select Webcam Enclosure Shape"));
         header.pack_start(&shape_dropdown);
 
-        // Hardware/Software Codec Selector in HeaderBar
-        let supported_codecs: Rc<Vec<CodecInfo>> = Rc::new(get_supported_codecs());
-        let codec_labels: Vec<&str> = supported_codecs
-            .iter()
-            .map(|c| c.display_name.as_str())
-            .collect();
-        let codec_dropdown = gtk::DropDown::from_strings(&codec_labels);
-        codec_dropdown.set_tooltip_text(Some("Select GPU Hardware or CPU Video Encoder"));
-        header.pack_start(&codec_dropdown);
-
         // Live Webcam Toggle Button in HeaderBar
         let cam_toggle = gtk::ToggleButton::new();
         cam_toggle.set_icon_name("camera-web-symbolic");
@@ -209,14 +223,48 @@ impl RecGoWindow {
         mic_toggle.set_tooltip_text(Some("Toggle Microphone Audio Recording"));
         header.pack_end(&mic_toggle);
 
+        // Preferences Button in HeaderBar
         let pref_btn = gtk::Button::from_icon_name("emblem-system-symbolic");
-        pref_btn.set_tooltip_text(Some("GPU & Hardware Encoder Diagnostics"));
+        pref_btn.set_tooltip_text(Some("Preferences (Video Codecs & GPU Acceleration)"));
         let win_clone = window.clone();
+        let toast_for_pref = toast_overlay.clone();
+        let status_for_pref = status_label.clone();
         pref_btn.connect_clicked(move |_| {
-            let dialog = PreferencesDialog::new();
+            let current_idx = win_clone.imp().selected_codec_index.get();
+            let win_for_dialog = win_clone.clone();
+            let toast_inner = toast_for_pref.clone();
+            let status_inner = status_for_pref.clone();
+            let dialog = PreferencesDialog::new(current_idx, move |new_idx| {
+                win_for_dialog.imp().selected_codec_index.set(new_idx);
+                let codecs = get_supported_codecs();
+                if let Some(c) = codecs.get(new_idx) {
+                    toast_inner.add_toast(adw::Toast::new(&format!("Active encoder: {}", c.display_name)));
+                    status_inner.set_text(&format!("Encoder: {}", c.display_name));
+                }
+            });
             dialog.present(Some(&win_clone));
         });
         header.pack_end(&pref_btn);
+
+        // About Button in HeaderBar
+        let about_btn = gtk::Button::from_icon_name("help-about-symbolic");
+        about_btn.set_tooltip_text(Some("About RecGo"));
+        let win_for_about = window.clone();
+        about_btn.connect_clicked(move |_| {
+            let about = adw::AboutDialog::builder()
+                .application_name("RecGo")
+                .application_icon("io.github.antonio.RecGo")
+                .developer_name("Antonio")
+                .version("0.1.0")
+                .comments("High-performance GPU-accelerated desktop and webcam recorder for GNOME.")
+                .website("https://github.com/Antux912012/RecGo")
+                .issue_url("https://github.com/Antux912012/RecGo/issues")
+                .license_type(gtk::License::Gpl30)
+                .copyright("© 2026 Antonio")
+                .build();
+            about.present(Some(&win_for_about));
+        });
+        header.pack_end(&about_btn);
 
         toolbar_view.add_top_bar(&header);
 
@@ -240,7 +288,6 @@ impl RecGoWindow {
             }
         }
 
-        let (_gpu_mode, gpu_summary) = detect_gpu_acceleration();
         let banner_text = format!(
             "GPU Acceleration Active: {} | Drag webcam to move; drag blue corner handle, scroll wheel, or use slider to resize.",
             gpu_summary
@@ -406,8 +453,10 @@ impl RecGoWindow {
         osd_box.append(&osd_dot);
         osd_box.append(&osd_text);
 
-        let status_label = gtk::Label::new(Some(&format!("Ready ({})", gpu_summary)));
-        status_label.add_css_class("dim-label");
+        // Desktop ScreenCast Preview Button with screen symbol
+        let btn_preview_screen = gtk::Button::from_icon_name("video-display-symbolic");
+        btn_preview_screen.set_css_classes(&["pill", "camera-preview-btn"]);
+        btn_preview_screen.set_tooltip_text(Some("Select Desktop or Window to Preview (ScreenCast)"));
 
         let left_status_box = gtk::Box::new(gtk::Orientation::Horizontal, 12);
         left_status_box.append(&osd_box);
@@ -416,6 +465,7 @@ impl RecGoWindow {
 
         let box_controls = gtk::Box::new(gtk::Orientation::Horizontal, 12);
         box_controls.set_halign(gtk::Align::Center);
+        box_controls.append(&btn_preview_screen);
         box_controls.append(&btn_record);
         box_controls.append(&btn_pause);
         box_controls.append(&btn_stop);
@@ -482,7 +532,7 @@ impl RecGoWindow {
         let status_for_prev = status_label.clone();
         let toast_for_prev = toast_overlay.clone();
 
-        btn_select_screen.connect_clicked(move |_| {
+        btn_preview_screen.connect_clicked(move |_| {
             let source_type = match source_dd_prev.selected() {
                 0 => SourceType::Monitor,
                 _ => SourceType::Window,
@@ -535,9 +585,9 @@ impl RecGoWindow {
         let btn_rec_clone = btn_record.clone();
         let btn_pause_clone = btn_pause.clone();
         let btn_stop_clone = btn_stop.clone();
+        let btn_prev_rec_clone = btn_preview_screen.clone();
         let status_for_rec = status_label.clone();
         let source_dd_clone = source_dropdown.clone();
-        let codec_dd_clone = codec_dropdown.clone();
         let codecs_list_rec = supported_codecs.clone();
         let win_for_rec = window.clone();
         let stream_holder_rec = active_stream_holder.clone();
@@ -551,7 +601,7 @@ impl RecGoWindow {
                 _ => SourceType::Window,
             };
 
-            let selected_idx = codec_dd_clone.selected() as usize;
+            let selected_idx = win_for_rec.imp().selected_codec_index.get();
             let (chosen_codec, chosen_container) = codecs_list_rec
                 .get(selected_idx)
                 .map(|c| (c.codec, c.container))
@@ -564,6 +614,7 @@ impl RecGoWindow {
             let btn_r = btn_rec_clone.clone();
             let btn_p = btn_pause_clone.clone();
             let btn_s = btn_stop_clone.clone();
+            let btn_prev_inner = btn_prev_rec_clone.clone();
             let status_l = status_for_rec.clone();
             let stream_store = stream_holder_rec.clone();
             let win_inner = win_for_rec.clone();
@@ -608,6 +659,7 @@ impl RecGoWindow {
                             osd_text_inner.set_text("REC  00:00:00");
                             osd_dot_inner.set_css_classes(&["camera-osd-dot", "recording"]);
                             preview_inner.set_recording_state(true, false);
+                            btn_prev_inner.set_sensitive(false);
                             btn_r.set_sensitive(false);
                             btn_p.set_sensitive(true);
                             btn_s.set_sensitive(true);
@@ -702,6 +754,7 @@ impl RecGoWindow {
                         osd_text_inner.set_text("REC  00:00:00");
                         osd_dot_inner.set_css_classes(&["camera-osd-dot", "recording"]);
                         preview_inner.set_recording_state(true, false);
+                        btn_prev_inner.set_sensitive(false);
                         btn_r.set_sensitive(false);
                         btn_p.set_sensitive(true);
                         btn_s.set_sensitive(true);
@@ -747,6 +800,7 @@ impl RecGoWindow {
         let btn_rec_stop = btn_record.clone();
         let btn_pause_stop = btn_pause.clone();
         let btn_stop_self = btn_stop.clone();
+        let btn_prev_stop = btn_preview_screen.clone();
         let status_for_stop = status_label.clone();
         let toast_for_stop = toast_overlay.clone();
         let elapsed_stop = elapsed_seconds.clone();
@@ -771,6 +825,7 @@ impl RecGoWindow {
             let preview_done = preview_for_stop.clone();
             let btn_r_done = btn_rec_stop.clone();
             let btn_p_done = btn_pause_stop.clone();
+            let btn_prev_done = btn_prev_stop.clone();
             let status_done = status_for_stop.clone();
             let toast_done = toast_for_stop.clone();
             let elapsed_done = elapsed_stop.clone();
@@ -787,6 +842,7 @@ impl RecGoWindow {
                 preview_done.set_recording_state(false, false);
                 btn_p_done.set_active(false);
                 btn_r_done.set_sensitive(true);
+                btn_prev_done.set_sensitive(true);
                 status_done.set_text("Recording saved to Videos folder");
                 toast_done.add_toast(adw::Toast::new("Video successfully saved to Videos folder"));
             });
