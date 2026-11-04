@@ -110,6 +110,12 @@ impl RecGoWindow {
         codec_dropdown.set_tooltip_text(Some("Select GPU Hardware or CPU Video Encoder"));
         header.pack_start(&codec_dropdown);
 
+        // Live Webcam Toggle Button in HeaderBar
+        let cam_toggle = gtk::ToggleButton::new();
+        cam_toggle.set_icon_name("camera-web-symbolic");
+        cam_toggle.set_tooltip_text(Some("Toggle Live Webcam Feed"));
+        header.pack_end(&cam_toggle);
+
         // Microphone Toggle Button in HeaderBar
         let mic_toggle = gtk::ToggleButton::new();
         mic_toggle.set_icon_name("audio-input-microphone-symbolic");
@@ -132,9 +138,20 @@ impl RecGoWindow {
         let preview = RecGoPreview::new();
         window.imp().preview.set(preview.clone()).ok();
 
-        // Start live webcam preview immediately if /dev/video0 is available
-        if let Ok(cam_feed) = LiveFeedCapture::new_webcam("/dev/video0") {
-            window.imp().webcam_feed.replace(Some(cam_feed));
+        let cam_guard = std::rc::Rc::new(std::cell::Cell::new(false));
+
+        // Start live webcam preview automatically if camera is available
+        match LiveFeedCapture::new_webcam_auto() {
+            Ok(cam_feed) => {
+                window.imp().webcam_feed.replace(Some(cam_feed));
+                cam_guard.set(true);
+                cam_toggle.set_active(true);
+                cam_guard.set(false);
+            }
+            Err(e) => {
+                eprintln!("RecGo: Webcam auto-start notice: {}", e);
+                cam_toggle.set_active(false);
+            }
         }
 
         let (_gpu_mode, gpu_summary) = detect_gpu_acceleration();
@@ -191,6 +208,38 @@ impl RecGoWindow {
                 _ => WebcamShape::Rectangle,
             };
             preview_for_shape.set_shape(shape);
+        });
+
+        let win_for_cam = window.clone();
+        let preview_for_cam = preview.clone();
+        let toast_for_cam = toast_overlay.clone();
+        let cam_guard_cb = cam_guard.clone();
+        cam_toggle.connect_toggled(move |btn| {
+            if cam_guard_cb.get() {
+                return;
+            }
+            if btn.is_active() {
+                if win_for_cam.imp().webcam_feed.borrow().is_none() {
+                    match LiveFeedCapture::new_webcam_auto() {
+                        Ok(cam_feed) => {
+                            win_for_cam.imp().webcam_feed.replace(Some(cam_feed));
+                            toast_for_cam.add_toast(adw::Toast::new("Webcam preview enabled"));
+                        }
+                        Err(err) => {
+                            cam_guard_cb.set(true);
+                            btn.set_active(false);
+                            cam_guard_cb.set(false);
+                            toast_for_cam.add_toast(adw::Toast::new(&format!("Webcam unavailable: {}", err)));
+                        }
+                    }
+                }
+            } else {
+                if let Some(cam) = win_for_cam.imp().webcam_feed.borrow_mut().take() {
+                    cam.stop_async();
+                }
+                preview_for_cam.set_webcam_texture(None);
+                toast_for_cam.add_toast(adw::Toast::new("Webcam preview disabled"));
+            }
         });
 
         let win_for_mic = window.clone();

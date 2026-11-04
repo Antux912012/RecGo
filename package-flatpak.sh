@@ -22,6 +22,8 @@ mkdir -p "${BUILD_DIR}/files/bin" \
          "${BUILD_DIR}/files/share/icons/hicolor/256x256/apps" \
          "${BUILD_DIR}/files/share/icons/hicolor/128x128/apps" \
          "${BUILD_DIR}/files/share/icons/hicolor/64x64/apps" \
+         "${BUILD_DIR}/files/share/icons/hicolor/48x48/apps" \
+         "${BUILD_DIR}/files/share/icons/hicolor/32x32/apps" \
          "${BUILD_DIR}/files/share/glib-2.0/schemas" \
          "${BUILD_DIR}/files/share/metainfo" \
          "${BUILD_DIR}/export/share/applications" \
@@ -29,7 +31,9 @@ mkdir -p "${BUILD_DIR}/files/bin" \
          "${BUILD_DIR}/export/share/icons/hicolor/512x512/apps" \
          "${BUILD_DIR}/export/share/icons/hicolor/256x256/apps" \
          "${BUILD_DIR}/export/share/icons/hicolor/128x128/apps" \
-         "${BUILD_DIR}/export/share/icons/hicolor/64x64/apps"
+         "${BUILD_DIR}/export/share/icons/hicolor/64x64/apps" \
+         "${BUILD_DIR}/export/share/icons/hicolor/48x48/apps" \
+         "${BUILD_DIR}/export/share/icons/hicolor/32x32/apps"
 
 cp -f "${PROJECT_DIR}/flatpak-metadata.ini" "${BUILD_DIR}/metadata"
 install -Dm755 "${PROJECT_DIR}/target/debug/recgo" "${BUILD_DIR}/files/bin/recgo"
@@ -39,7 +43,7 @@ install -Dm644 "${PROJECT_DIR}/data/io.github.antonio.RecGo.desktop.in" \
     "${BUILD_DIR}/export/share/applications/io.github.antonio.RecGo.desktop"
 
 # Install new PNG icons at all standard resolutions
-for size in 512 256 128 64; do
+for size in 512 256 128 64 48 32; do
     install -Dm644 "${PROJECT_DIR}/data/icons/io.github.antonio.RecGo_${size}x${size}.png" \
         "${BUILD_DIR}/files/share/icons/hicolor/${size}x${size}/apps/io.github.antonio.RecGo.png"
     install -Dm644 "${PROJECT_DIR}/data/icons/io.github.antonio.RecGo_${size}x${size}.png" \

@@ -34,17 +34,32 @@ pub struct LiveFeedCapture {
 
 impl LiveFeedCapture {
     pub fn new_webcam(device: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        // Use OpenGL acceleration for color/scale conversion if available
-        let convert_chain = if has_element("glupload") && has_element("glcolorconvert") {
-            "videoconvert ! glupload ! glcolorconvert ! gldownload ! videoscale"
-        } else {
-            "videoconvert ! videoscale"
-        };
         let desc = format!(
-            "v4l2src device={} ! {} ! video/x-raw,format=RGBA,width=640,height=360 ! appsink name=sink max-buffers=1 drop=true sync=false",
-            device, convert_chain
+            "v4l2src device={} ! videoconvert ! video/x-raw,format=RGBA ! appsink name=sink max-buffers=1 drop=true sync=false",
+            device
         );
         Self::from_pipeline_description(&desc)
+    }
+
+    pub fn new_webcam_auto() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        // Prioritize /dev/video0 for standard capture cameras
+        for dev in &["/dev/video0", "/dev/video2", "/dev/video1"] {
+            if std::path::Path::new(dev).exists() {
+                if let Ok(capture) = Self::new_webcam(dev) {
+                    eprintln!("RecGo: Started live webcam capture on {}", dev);
+                    return Ok(capture);
+                }
+            }
+        }
+
+        // PipeWire camera fallback for sandboxed Flatpak camera portal
+        let pipewire_desc = "pipewiresrc ! videoconvert ! video/x-raw,format=RGBA ! appsink name=sink max-buffers=1 drop=true sync=false";
+        if let Ok(capture) = Self::from_pipeline_description(pipewire_desc) {
+            eprintln!("RecGo: Started live webcam capture via PipeWire");
+            return Ok(capture);
+        }
+
+        Err("No functional webcam device or PipeWire camera stream found".into())
     }
 
     pub fn new_screen(fd: RawFd, node_id: u32) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
