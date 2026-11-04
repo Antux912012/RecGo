@@ -16,6 +16,11 @@
   <url type="bugtracker">https://github.com/Antux912012/RecGo/issues</url>
   <url type="vcs-browser">https://github.com/Antux912012/RecGo</url>
   <releases>
+    <release version="0.1.1" date="2026-11-04">
+      <description>
+        <p>Fix crash on recording trigger by resolving PipeWire socket contention and V4L2 device conflicts.</p>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-11-04">
       <description>
         <p>Initial release of RecGo with GPU acceleration, live camera preview, viewfinder OSD, and Preferences dialog.</p>

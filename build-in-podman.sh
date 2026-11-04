@@ -16,6 +16,7 @@ fi
 
 exec podman run --rm \
     --userns=keep-id \
+    -v recgo-cargo-cache:/root/.cargo:Z \
     -v "${PROJECT_DIR}:/workspace:Z" \
     -w /workspace \
     "${CONTAINER_IMAGE}" \

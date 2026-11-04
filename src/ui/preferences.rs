@@ -44,7 +44,7 @@ impl PreferencesDialog {
         rec_page.set_icon_name(Some("media-record-symbolic"));
 
         let enc_choice_group = adw::PreferencesGroup::new();
-        enc_choice_group.set_title("Video Encoder & Container Format");
+        enc_choice_group.set_title("Video Encoder &amp; Container Format");
         enc_choice_group.set_description(Some(
             "Select the video format and hardware-accelerated encoder used for recordings.",
         ));
@@ -81,7 +81,7 @@ impl PreferencesDialog {
                 "vah264enc / vah265enc / vavp8enc / vapostproc",
             ),
             (
-                "Vulkan Compute & Video Acceleration",
+                "Vulkan Compute &amp; Video Acceleration",
                 has_element("vulkanupload") && has_element("vulkancolorconvert"),
                 "vulkanupload / vulkancolorconvert / vulkanshaderspv",
             ),

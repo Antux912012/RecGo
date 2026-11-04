@@ -1531,7 +1531,7 @@ dependencies = [
 
 [[package]]
 name = "recgo"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ashpd",
  "gio",
@@ -1543,6 +1543,7 @@ dependencies = [
  "gstreamer-video",
  "gtk4",
  "libadwaita",
+ "libc",
  "serde",
  "serde_json",
  "tokio",

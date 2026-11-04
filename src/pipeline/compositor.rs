@@ -281,8 +281,8 @@ impl CompositorPipeline {
                          videoconvert ! tee name=t \
                          t. ! queue ! {pre} ! {enc} {enc_opts} {post} ! queue ! {mux} name=mux ! filesink location=\"{loc}\" \
                          t. ! queue max-size-buffers=1 leaky=downstream ! videoconvert ! video/x-raw,format=RGBA ! appsink name=previewsink max-buffers=1 drop=true sync=false \
-                         pipewiresrc fd={fd} path={node} do-timestamp=true ! videoconvert ! comp.sink_0 \
-                         v4l2src device={dev} ! videoconvert ! comp.sink_1",
+                         pipewiresrc fd={fd} path={node} do-timestamp=true ! queue max-size-buffers=3 leaky=downstream ! videoconvert ! videoscale ! comp.sink_0 \
+                         v4l2src device={dev} ! queue max-size-buffers=3 leaky=downstream ! videoconvert ! videoscale ! comp.sink_1",
                         fd = fd,
                         node = node,
                         dev = dev,
@@ -295,7 +295,7 @@ impl CompositorPipeline {
                     )
                 } else if let Some((fd, node)) = screen_stream {
                     format!(
-                        "pipewiresrc fd={fd} path={node} do-timestamp=true ! videoconvert ! tee name=t \
+                        "pipewiresrc fd={fd} path={node} do-timestamp=true ! queue max-size-buffers=3 leaky=downstream ! videoconvert ! tee name=t \
                          t. ! queue ! {pre} ! {enc} {enc_opts} {post} ! queue ! {mux} name=mux ! filesink location=\"{loc}\" \
                          t. ! queue max-size-buffers=1 leaky=downstream ! videoconvert ! video/x-raw,format=RGBA ! appsink name=previewsink max-buffers=1 drop=true sync=false",
                         fd = fd,
@@ -320,8 +320,8 @@ impl CompositorPipeline {
                          videoconvert ! tee name=t \
                          t. ! queue ! {pre} ! {enc} {enc_opts} {post} ! queue ! {mux} name=mux ! filesink location=\"{loc}\" \
                          t. ! queue max-size-buffers=1 leaky=downstream ! videoconvert ! video/x-raw,format=RGBA ! appsink name=previewsink max-buffers=1 drop=true sync=false \
-                         pipewiresrc fd={fd} path={node} do-timestamp=true ! videoconvert ! comp.sink_0 \
-                         v4l2src device={dev} ! videoconvert ! comp.sink_1",
+                         pipewiresrc fd={fd} path={node} do-timestamp=true ! queue max-size-buffers=3 leaky=downstream ! videoconvert ! videoscale ! comp.sink_0 \
+                         v4l2src device={dev} ! queue max-size-buffers=3 leaky=downstream ! videoconvert ! videoscale ! comp.sink_1",
                         fd = fd,
                         node = node,
                         dev = dev,
@@ -334,7 +334,7 @@ impl CompositorPipeline {
                     )
                 } else if let Some((fd, node)) = screen_stream {
                     format!(
-                        "pipewiresrc fd={fd} path={node} do-timestamp=true ! videoconvert ! tee name=t \
+                        "pipewiresrc fd={fd} path={node} do-timestamp=true ! queue max-size-buffers=3 leaky=downstream ! videoconvert ! tee name=t \
                          t. ! queue ! {pre} ! {enc} {enc_opts} {post} ! queue ! {mux} name=mux ! filesink location=\"{loc}\" \
                          t. ! queue max-size-buffers=1 leaky=downstream ! videoconvert ! video/x-raw,format=RGBA ! appsink name=previewsink max-buffers=1 drop=true sync=false",
                         fd = fd,

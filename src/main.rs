@@ -12,6 +12,11 @@ use adw::prelude::*;
 use application::RecGoApplication;
 
 fn main() -> glib::ExitCode {
+    // Ignore SIGPIPE so broken IPC sockets (PipeWire / GStreamer) never force-quit the application
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_IGN);
+    }
+
     gst::init().expect("Failed to initialize GStreamer");
 
     let app = RecGoApplication::new();

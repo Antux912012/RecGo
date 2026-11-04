@@ -118,7 +118,7 @@ use crate::pipeline::codecs::{
     ContainerFormat, VideoCodec,
 };
 use crate::pipeline::compositor::{CompositorPipeline, LayoutPreset, LiveFeedCapture, WebcamShape};
-use crate::portal::screencast::{start_screencast_session, CaptureStream};
+use crate::portal::screencast::{portal_runtime, start_screencast_session, CaptureStream};
 use crate::ui::preferences::PreferencesDialog;
 use crate::ui::preview::RecGoPreview;
 
@@ -255,7 +255,7 @@ impl RecGoWindow {
                 .application_name("RecGo")
                 .application_icon("io.github.antonio.RecGo")
                 .developer_name("Antonio")
-                .version("0.1.0")
+                .version("0.1.1")
                 .comments("High-performance GPU-accelerated desktop and webcam recorder for GNOME.")
                 .website("https://github.com/Antux912012/RecGo")
                 .issue_url("https://github.com/Antux912012/RecGo/issues")
@@ -545,13 +545,11 @@ impl RecGoWindow {
             glib::spawn_future_local(async move {
                 status_l.set_text("Selecting desktop or window for live preview...");
                 let (tx, rx) = tokio::sync::oneshot::channel();
-                std::thread::spawn(move || {
-                    let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
-                    let res = rt.block_on(start_screencast_session(
-                        None,
+                portal_runtime().spawn(async move {
+                    let res = start_screencast_session(
                         source_type,
                         CursorMode::Embedded,
-                    ));
+                    ).await;
                     let _ = tx.send(res);
                 });
 
@@ -635,6 +633,12 @@ impl RecGoWindow {
                 // If CameraOnly layout, record camera directly without screen portal prompt
                 if layout == LayoutPreset::CameraOnly {
                     status_l.set_text("Starting camera recording...");
+
+                    // Stop live webcam preview so CompositorPipeline has exclusive access to /dev/video0
+                    if let Some(cam) = win_inner.imp().webcam_feed.borrow_mut().take() {
+                        cam.stop_async();
+                    }
+
                     match CompositorPipeline::new(
                         None,
                         Some("/dev/video0".to_string()),
@@ -686,13 +690,11 @@ impl RecGoWindow {
                     None => {
                         status_l.set_text("Requesting screen access...");
                         let (tx, rx) = tokio::sync::oneshot::channel();
-                        std::thread::spawn(move || {
-                            let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
-                            let res = rt.block_on(start_screencast_session(
-                                None,
+                        portal_runtime().spawn(async move {
+                            let res = start_screencast_session(
                                 source_type,
                                 CursorMode::Embedded,
-                            ));
+                            ).await;
                             let _ = tx.send(res);
                         });
 
@@ -721,10 +723,19 @@ impl RecGoWindow {
                     }
                 };
 
-                let webcam_dev = if win_inner.imp().webcam_feed.borrow().is_some()
-                    || layout == LayoutPreset::DesktopPiP
-                    || layout == LayoutPreset::SideBySide
-                {
+                // Stop active desktop preview feed so CompositorPipeline has sole ownership of the PipeWire stream
+                if let Some(old_scr) = win_inner.imp().screen_preview_feed.borrow_mut().take() {
+                    old_scr.stop_async();
+                }
+
+                // Stop active webcam preview feed if the recording layout uses the camera
+                if layout == LayoutPreset::DesktopPiP || layout == LayoutPreset::SideBySide {
+                    if let Some(cam) = win_inner.imp().webcam_feed.borrow_mut().take() {
+                        cam.stop_async();
+                    }
+                }
+
+                let webcam_dev = if layout == LayoutPreset::DesktopPiP || layout == LayoutPreset::SideBySide {
                     Some("/dev/video0".to_string())
                 } else {
                     None
@@ -801,6 +812,7 @@ impl RecGoWindow {
         let btn_pause_stop = btn_pause.clone();
         let btn_stop_self = btn_stop.clone();
         let btn_prev_stop = btn_preview_screen.clone();
+        let stream_store_stop = active_stream_holder.clone();
         let status_for_stop = status_label.clone();
         let toast_for_stop = toast_overlay.clone();
         let elapsed_stop = elapsed_seconds.clone();
@@ -831,6 +843,7 @@ impl RecGoWindow {
             let elapsed_done = elapsed_stop.clone();
             let osd_text_done = osd_text_stop.clone();
             let osd_dot_done = osd_dot_stop.clone();
+            let stream_store_done = stream_store_stop.clone();
 
             glib::spawn_future_local(async move {
                 let _ = rx.await;
@@ -843,6 +856,23 @@ impl RecGoWindow {
                 btn_p_done.set_active(false);
                 btn_r_done.set_sensitive(true);
                 btn_prev_done.set_sensitive(true);
+
+                // Restore live webcam preview if active
+                if win_done.imp().webcam_feed.borrow().is_none() {
+                    if let Ok(cam_feed) = LiveFeedCapture::new_webcam_auto() {
+                        win_done.imp().webcam_feed.replace(Some(cam_feed));
+                    }
+                }
+
+                // Restore desktop preview feed if screencast stream exists
+                if let Some(ref stream) = *stream_store_done.borrow() {
+                    if let Ok(cloned_fd) = stream.try_clone_fd() {
+                        if let Ok(feed) = LiveFeedCapture::new_screen(cloned_fd.into_raw_fd(), stream.node_id) {
+                            win_done.imp().screen_preview_feed.replace(Some(feed));
+                        }
+                    }
+                }
+
                 status_done.set_text("Recording saved to Videos folder");
                 toast_done.add_toast(adw::Toast::new("Video successfully saved to Videos folder"));
             });
