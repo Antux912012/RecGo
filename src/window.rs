@@ -3,11 +3,97 @@
 use adw::prelude::*;
 use adw::subclass::prelude::*;
 use ashpd::desktop::screencast::{CursorMode, SourceType};
-use gtk::{gio, glib};
+use gtk::{gdk, gio, glib};
 use std::cell::{Cell, RefCell};
+use std::os::fd::IntoRawFd;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
+
+const CAMERA_CSS: &str = r#"
+.camera-record-btn {
+    background: linear-gradient(180deg, #ed333b 0%, #c01c28 100%);
+    color: #ffffff;
+    font-weight: 700;
+    box-shadow: 0 2px 8px rgba(192, 28, 40, 0.45);
+    border: 1.5px solid #ff7b84;
+    padding: 6px 18px;
+    border-radius: 9999px;
+    transition: all 200ms ease;
+}
+.camera-record-btn:hover {
+    background: linear-gradient(180deg, #f66151 0%, #d81b2a 100%);
+    box-shadow: 0 0 14px rgba(237, 51, 59, 0.7);
+}
+.camera-record-btn:disabled {
+    background: rgba(120, 120, 120, 0.25);
+    color: rgba(255, 255, 255, 0.35);
+    border-color: rgba(255, 255, 255, 0.1);
+    box-shadow: none;
+}
+
+.camera-pause-btn {
+    font-weight: 600;
+    padding: 6px 16px;
+    border-radius: 9999px;
+    border: 1.5px solid rgba(255, 255, 255, 0.15);
+    transition: all 200ms ease;
+}
+.camera-pause-btn:checked {
+    background: linear-gradient(180deg, #f6d32d 0%, #e5a50a 100%);
+    color: #1a1a1a;
+    font-weight: 700;
+    border-color: #f8e45c;
+    box-shadow: 0 0 12px rgba(246, 211, 45, 0.65);
+}
+
+.camera-stop-btn {
+    background: linear-gradient(180deg, #303541 0%, #1e222a 100%);
+    color: #ffffff;
+    font-weight: 600;
+    border: 1.5px solid #4a5263;
+    padding: 6px 16px;
+    border-radius: 9999px;
+    transition: all 200ms ease;
+}
+.camera-stop-btn:hover:not(:disabled) {
+    background: linear-gradient(180deg, #c01c28 0%, #a51d2d 100%);
+    border-color: #ed333b;
+    box-shadow: 0 0 12px rgba(192, 28, 40, 0.55);
+}
+.camera-stop-btn:disabled {
+    opacity: 0.4;
+}
+
+.camera-osd-badge {
+    background: rgba(14, 18, 25, 0.88);
+    border: 1.5px solid rgba(255, 255, 255, 0.14);
+    border-radius: 9999px;
+    padding: 4px 12px;
+}
+
+.camera-osd-time {
+    font-family: monospace;
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 1.2px;
+}
+
+.camera-osd-dot.standby {
+    color: #77767b;
+}
+.camera-osd-dot.recording {
+    color: #ed333b;
+}
+.camera-osd-dot.paused {
+    color: #f6d32d;
+}
+
+.camera-btn-label {
+    font-weight: 700;
+    font-size: 13px;
+}
+"#;
 
 use crate::pipeline::codecs::{
     detect_gpu_acceleration, get_extension_for_container, get_supported_codecs, CodecInfo,
@@ -255,25 +341,78 @@ impl RecGoWindow {
             toast_for_mic.add_toast(adw::Toast::new(msg));
         });
 
-        // Bottom Action Bar: Status, Record/Pause/Stop, and Webcam Size Slider
+        // Initialize Camera Styles CSS Provider
+        let css_provider = gtk::CssProvider::new();
+        css_provider.load_from_data(CAMERA_CSS);
+        if let Some(display) = gdk::Display::default() {
+            gtk::style_context_add_provider_for_display(
+                &display,
+                &css_provider,
+                gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+            );
+        }
+
+        // Bottom Action Bar: Camera Viewfinder OSD, Record/Pause/Stop triggers, and Webcam Size Slider
         let action_bar = gtk::ActionBar::new();
 
-        let btn_record = gtk::Button::with_label("Record");
-        btn_record.add_css_class("suggested-action");
-        btn_record.add_css_class("pill");
+        // Camera Shutter Record Button with camera record symbol
+        let btn_record = gtk::Button::new();
+        let rec_box = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        let rec_icon = gtk::Image::from_icon_name("media-record-symbolic");
+        rec_icon.set_pixel_size(18);
+        let rec_label = gtk::Label::new(Some("Record"));
+        rec_label.set_css_classes(&["camera-btn-label"]);
+        rec_box.append(&rec_icon);
+        rec_box.append(&rec_label);
+        btn_record.set_child(Some(&rec_box));
+        btn_record.set_css_classes(&["pill", "camera-record-btn"]);
+        btn_record.set_tooltip_text(Some("Start Recording (Camera Shutter)"));
 
-        let btn_pause = gtk::ToggleButton::with_label("Pause");
-        btn_pause.add_css_class("pill");
+        // Camera Pause Button with ❚❚ symbol
+        let btn_pause = gtk::ToggleButton::new();
+        let pause_box = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        let pause_icon = gtk::Image::from_icon_name("media-playback-pause-symbolic");
+        pause_icon.set_pixel_size(18);
+        let pause_label = gtk::Label::new(Some("Pause"));
+        pause_label.set_css_classes(&["camera-btn-label"]);
+        pause_box.append(&pause_icon);
+        pause_box.append(&pause_label);
+        btn_pause.set_child(Some(&pause_box));
+        btn_pause.set_css_classes(&["pill", "camera-pause-btn"]);
+        btn_pause.set_tooltip_text(Some("Pause / Resume (❚❚)"));
         btn_pause.set_sensitive(false);
 
-        let btn_stop = gtk::Button::with_label("Stop");
-        btn_stop.add_css_class("destructive-action");
-        btn_stop.add_css_class("pill");
+        // Camera Stop Button with ◼ symbol
+        let btn_stop = gtk::Button::new();
+        let stop_box = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        let stop_icon = gtk::Image::from_icon_name("media-playback-stop-symbolic");
+        stop_icon.set_pixel_size(18);
+        let stop_label = gtk::Label::new(Some("Stop"));
+        stop_label.set_css_classes(&["camera-btn-label"]);
+        stop_box.append(&stop_icon);
+        stop_box.append(&stop_label);
+        btn_stop.set_child(Some(&stop_box));
+        btn_stop.set_css_classes(&["pill", "camera-stop-btn"]);
+        btn_stop.set_tooltip_text(Some("Stop & Save Recording (◼)"));
         btn_stop.set_sensitive(false);
+
+        // Camera Viewfinder OSD Timecode Display (STBY / REC / PAUSE)
+        let osd_box = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        osd_box.set_css_classes(&["camera-osd-badge"]);
+        let osd_dot = gtk::Label::new(Some("●"));
+        osd_dot.set_css_classes(&["camera-osd-dot", "standby"]);
+        let osd_text = gtk::Label::new(Some("STBY  00:00:00"));
+        osd_text.set_css_classes(&["camera-osd-time"]);
+        osd_box.append(&osd_dot);
+        osd_box.append(&osd_text);
 
         let status_label = gtk::Label::new(Some(&format!("Ready ({})", gpu_summary)));
         status_label.add_css_class("dim-label");
-        action_bar.pack_start(&status_label);
+
+        let left_status_box = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+        left_status_box.append(&osd_box);
+        left_status_box.append(&status_label);
+        action_bar.pack_start(&left_status_box);
 
         let box_controls = gtk::Box::new(gtk::Orientation::Horizontal, 12);
         box_controls.set_halign(gtk::Align::Center);
@@ -301,6 +440,37 @@ impl RecGoWindow {
         action_bar.pack_end(&size_box);
 
         toolbar_view.add_bottom_bar(&action_bar);
+
+        // Elapsed recording timer state & OSD ticker
+        let elapsed_seconds = Rc::new(Cell::new(0u64));
+        let win_osd = window.clone();
+        let elapsed_osd = elapsed_seconds.clone();
+        let osd_text_osd = osd_text.clone();
+        let osd_dot_osd = osd_dot.clone();
+        glib::timeout_add_local(Duration::from_secs(1), move || {
+            if win_osd.imp().is_recording.get() {
+                if !win_osd.imp().is_paused.get() {
+                    let s = elapsed_osd.get() + 1;
+                    elapsed_osd.set(s);
+                    let hrs = s / 3600;
+                    let mins = (s % 3600) / 60;
+                    let secs = s % 60;
+                    osd_text_osd.set_text(&format!("REC  {:02}:{:02}:{:02}", hrs, mins, secs));
+                    osd_dot_osd.set_css_classes(&["camera-osd-dot", "recording"]);
+                } else {
+                    let s = elapsed_osd.get();
+                    let hrs = s / 3600;
+                    let mins = (s % 3600) / 60;
+                    let secs = s % 60;
+                    osd_text_osd.set_text(&format!("PAUSE  {:02}:{:02}:{:02}", hrs, mins, secs));
+                    osd_dot_osd.set_css_classes(&["camera-osd-dot", "paused"]);
+                }
+            } else {
+                osd_text_osd.set_text("STBY  00:00:00");
+                osd_dot_osd.set_css_classes(&["camera-osd-dot", "standby"]);
+            }
+            glib::ControlFlow::Continue
+        });
 
         // Shared portal stream holder
         let active_stream_holder: Rc<RefCell<Option<CaptureStream>>> = Rc::new(RefCell::new(None));
@@ -339,17 +509,19 @@ impl RecGoWindow {
                     if let Some(old_preview) = win_inner.imp().screen_preview_feed.borrow_mut().take() {
                         old_preview.stop_async();
                     }
-                    match LiveFeedCapture::new_screen(stream.raw_fd(), stream.node_id) {
-                        Ok(feed) => {
-                            win_inner.imp().screen_preview_feed.replace(Some(feed));
-                            status_l.set_text(&format!(
-                                "Live desktop preview active ({}x{})",
-                                stream.width, stream.height
-                            ));
-                            toast_inner.add_toast(adw::Toast::new("Live desktop preview active"));
-                        }
-                        Err(e) => {
-                            status_l.set_text(&format!("Preview error: {}", e));
+                    if let Ok(cloned_fd) = stream.try_clone_fd() {
+                        match LiveFeedCapture::new_screen(cloned_fd.into_raw_fd(), stream.node_id) {
+                            Ok(feed) => {
+                                win_inner.imp().screen_preview_feed.replace(Some(feed));
+                                status_l.set_text(&format!(
+                                    "Live desktop preview active ({}x{})",
+                                    stream.width, stream.height
+                                ));
+                                toast_inner.add_toast(adw::Toast::new("Live desktop preview active"));
+                            }
+                            Err(e) => {
+                                status_l.set_text(&format!("Preview error: {}", e));
+                            }
                         }
                     }
                     stream_store.replace(Some(stream));
@@ -369,6 +541,9 @@ impl RecGoWindow {
         let codecs_list_rec = supported_codecs.clone();
         let win_for_rec = window.clone();
         let stream_holder_rec = active_stream_holder.clone();
+        let elapsed_rec = elapsed_seconds.clone();
+        let osd_text_rec = osd_text.clone();
+        let osd_dot_rec = osd_dot.clone();
 
         btn_record.connect_clicked(move |_| {
             let source_type = match source_dd_clone.selected() {
@@ -382,6 +557,8 @@ impl RecGoWindow {
                 .map(|c| (c.codec, c.container))
                 .unwrap_or((VideoCodec::H264, ContainerFormat::Mp4));
 
+            let layout = preview_for_rec.layout();
+            let shape = preview_for_rec.shape();
             let toast_inner = toast_for_rec.clone();
             let preview_inner = preview_for_rec.clone();
             let btn_r = btn_rec_clone.clone();
@@ -390,92 +567,150 @@ impl RecGoWindow {
             let status_l = status_for_rec.clone();
             let stream_store = stream_holder_rec.clone();
             let win_inner = win_for_rec.clone();
+            let elapsed_inner = elapsed_rec.clone();
+            let osd_text_inner = osd_text_rec.clone();
+            let osd_dot_inner = osd_dot_rec.clone();
 
             glib::spawn_future_local(async move {
-                if let Some(prev_feed) = win_inner.imp().screen_preview_feed.borrow_mut().take() {
-                    prev_feed.stop_async();
+                let out_dir = glib::user_special_dir(glib::UserDirectory::Videos)
+                    .unwrap_or_else(|| PathBuf::from("/tmp"));
+                let timestamp = glib::DateTime::now_local()
+                    .and_then(|dt| dt.format("%Y-%m-%d_%H-%M-%S"))
+                    .unwrap_or_else(|_| "output".into());
+                let ext = get_extension_for_container(&chosen_container);
+                let out_file = out_dir.join(format!("RecGo-{}.{}", timestamp, ext));
+                let mic_on = win_inner.imp().mic_enabled.get();
+
+                // If CameraOnly layout, record camera directly without screen portal prompt
+                if layout == LayoutPreset::CameraOnly {
+                    status_l.set_text("Starting camera recording...");
+                    match CompositorPipeline::new(
+                        None,
+                        Some("/dev/video0".to_string()),
+                        mic_on,
+                        layout,
+                        shape,
+                        chosen_codec,
+                        chosen_container,
+                        out_file.clone(),
+                    ) {
+                        Ok(pipeline) => {
+                            if let Err(err) = pipeline.start() {
+                                status_l.set_text(&format!("Pipeline start error: {}", err));
+                                toast_inner.add_toast(adw::Toast::new(&format!("Pipeline error: {}", err)));
+                                return;
+                            }
+                            let enc_desc = pipeline.encoder_description.clone();
+                            win_inner.imp().pipeline.replace(Some(pipeline));
+                            win_inner.imp().is_recording.set(true);
+                            win_inner.imp().is_paused.set(false);
+                            elapsed_inner.set(0);
+                            osd_text_inner.set_text("REC  00:00:00");
+                            osd_dot_inner.set_css_classes(&["camera-osd-dot", "recording"]);
+                            preview_inner.set_recording_state(true, false);
+                            btn_r.set_sensitive(false);
+                            btn_p.set_sensitive(true);
+                            btn_s.set_sensitive(true);
+                            status_l.set_text(&format!("Recording Camera [{}] -> {}", enc_desc, out_file.display()));
+                            toast_inner.add_toast(adw::Toast::new(&format!("Recording camera with {}", enc_desc)));
+                        }
+                        Err(err) => {
+                            status_l.set_text(&format!("Pipeline error: {}", err));
+                            toast_inner.add_toast(adw::Toast::new(&format!("GStreamer error: {}", err)));
+                        }
+                    }
+                    return;
                 }
 
-                status_l.set_text("Starting GNOME ScreenCast session...");
-                let (tx, rx) = tokio::sync::oneshot::channel();
-                std::thread::spawn(move || {
-                    let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
-                    let res = rt.block_on(start_screencast_session(
-                        None,
-                        source_type,
-                        CursorMode::Embedded,
-                    ));
-                    let _ = tx.send(res);
-                });
+                // Check if active screen stream is already available or request via desktop portal
+                let existing_stream = if let Some(ref s) = *stream_store.borrow() {
+                    s.try_clone_fd().ok().map(|fd| (fd.into_raw_fd(), s.node_id))
+                } else {
+                    None
+                };
 
-                match rx.await {
-                    Ok(Ok(stream)) => {
-                        let out_dir = glib::user_special_dir(glib::UserDirectory::Videos)
-                            .unwrap_or_else(|| PathBuf::from("/tmp"));
-                        let timestamp = glib::DateTime::now_local()
-                            .and_then(|dt| dt.format("%Y-%m-%d_%H-%M-%S"))
-                            .unwrap_or_else(|_| "output".into());
-                        let ext = get_extension_for_container(&chosen_container);
-                        let out_file = out_dir.join(format!("RecGo-{}.{}", timestamp, ext));
+                let (screen_fd, screen_node) = match existing_stream {
+                    Some(info) => info,
+                    None => {
+                        status_l.set_text("Requesting screen access...");
+                        let (tx, rx) = tokio::sync::oneshot::channel();
+                        std::thread::spawn(move || {
+                            let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
+                            let res = rt.block_on(start_screencast_session(
+                                None,
+                                source_type,
+                                CursorMode::Embedded,
+                            ));
+                            let _ = tx.send(res);
+                        });
 
-                        let mic_on = win_inner.imp().mic_enabled.get();
-
-                        match CompositorPipeline::new(
-                            stream.raw_fd(),
-                            stream.node_id,
-                            mic_on,
-                            preview_inner.layout(),
-                            preview_inner.shape(),
-                            chosen_codec,
-                            chosen_container,
-                            out_file.clone(),
-                        ) {
-                            Ok(pipeline) => {
-                                if let Err(err) = pipeline.start() {
-                                    status_l.set_text(&format!("Pipeline start error: {}", err));
-                                    toast_inner.add_toast(adw::Toast::new(&format!(
-                                        "Failed to start pipeline: {}",
-                                        err
-                                    )));
+                        match rx.await {
+                            Ok(Ok(stream)) => {
+                                let cloned = stream.try_clone_fd().ok().map(|fd| fd.into_raw_fd());
+                                let node = stream.node_id;
+                                stream_store.replace(Some(stream));
+                                if let Some(cfd) = cloned {
+                                    (cfd, node)
+                                } else {
+                                    status_l.set_text("Failed to duplicate screen stream handle");
                                     return;
                                 }
-                                let enc_desc = pipeline.encoder_description.clone();
-                                win_inner.imp().pipeline.replace(Some(pipeline));
-                                stream_store.replace(Some(stream));
-                                win_inner.imp().is_recording.set(true);
-                                win_inner.imp().is_paused.set(false);
-                                preview_inner.set_recording_state(true, false);
-                                btn_r.set_sensitive(false);
-                                btn_p.set_sensitive(true);
-                                btn_s.set_sensitive(true);
-                                status_l.set_text(&format!(
-                                    "Recording [{}] -> {}",
-                                    enc_desc,
-                                    out_file.display()
-                                ));
-                                toast_inner.add_toast(adw::Toast::new(&format!(
-                                    "Recording with {}",
-                                    enc_desc
-                                )));
                             }
-                            Err(err) => {
-                                status_l.set_text(&format!("Pipeline build error: {}", err));
-                                toast_inner.add_toast(adw::Toast::new(&format!(
-                                    "GStreamer error: {}",
-                                    err
-                                )));
+                            Ok(Err(err)) => {
+                                status_l.set_text("Screen selection cancelled or failed");
+                                toast_inner.add_toast(adw::Toast::new(&format!("ScreenCast portal: {}", err)));
+                                return;
+                            }
+                            Err(_) => {
+                                status_l.set_text("Portal request failed");
+                                return;
                             }
                         }
                     }
-                    Ok(Err(err)) => {
-                        status_l.set_text("Portal request cancelled or failed");
-                        toast_inner.add_toast(adw::Toast::new(&format!(
-                            "ScreenCast Portal: {}",
-                            err
-                        )));
+                };
+
+                let webcam_dev = if win_inner.imp().webcam_feed.borrow().is_some()
+                    || layout == LayoutPreset::DesktopPiP
+                    || layout == LayoutPreset::SideBySide
+                {
+                    Some("/dev/video0".to_string())
+                } else {
+                    None
+                };
+
+                match CompositorPipeline::new(
+                    Some((screen_fd, screen_node)),
+                    webcam_dev,
+                    mic_on,
+                    layout,
+                    shape,
+                    chosen_codec,
+                    chosen_container,
+                    out_file.clone(),
+                ) {
+                    Ok(pipeline) => {
+                        if let Err(err) = pipeline.start() {
+                            status_l.set_text(&format!("Pipeline start error: {}", err));
+                            toast_inner.add_toast(adw::Toast::new(&format!("Pipeline error: {}", err)));
+                            return;
+                        }
+                        let enc_desc = pipeline.encoder_description.clone();
+                        win_inner.imp().pipeline.replace(Some(pipeline));
+                        win_inner.imp().is_recording.set(true);
+                        win_inner.imp().is_paused.set(false);
+                        elapsed_inner.set(0);
+                        osd_text_inner.set_text("REC  00:00:00");
+                        osd_dot_inner.set_css_classes(&["camera-osd-dot", "recording"]);
+                        preview_inner.set_recording_state(true, false);
+                        btn_r.set_sensitive(false);
+                        btn_p.set_sensitive(true);
+                        btn_s.set_sensitive(true);
+                        status_l.set_text(&format!("Recording [{}] -> {}", enc_desc, out_file.display()));
+                        toast_inner.add_toast(adw::Toast::new(&format!("Recording with {}", enc_desc)));
                     }
-                    Err(_) => {
-                        status_l.set_text("Portal channel closed");
+                    Err(err) => {
+                        status_l.set_text(&format!("Pipeline error: {}", err));
+                        toast_inner.add_toast(adw::Toast::new(&format!("GStreamer error: {}", err)));
                     }
                 }
             });
@@ -514,7 +749,9 @@ impl RecGoWindow {
         let btn_stop_self = btn_stop.clone();
         let status_for_stop = status_label.clone();
         let toast_for_stop = toast_overlay.clone();
-        let stream_holder_stop = active_stream_holder.clone();
+        let elapsed_stop = elapsed_seconds.clone();
+        let osd_text_stop = osd_text.clone();
+        let osd_dot_stop = osd_dot.clone();
 
         btn_stop.connect_clicked(move |_| {
             status_for_stop.set_text("Finalizing recording file...");
@@ -536,18 +773,22 @@ impl RecGoWindow {
             let btn_p_done = btn_pause_stop.clone();
             let status_done = status_for_stop.clone();
             let toast_done = toast_for_stop.clone();
-            let stream_done = stream_holder_stop.clone();
+            let elapsed_done = elapsed_stop.clone();
+            let osd_text_done = osd_text_stop.clone();
+            let osd_dot_done = osd_dot_stop.clone();
 
             glib::spawn_future_local(async move {
                 let _ = rx.await;
-                stream_done.replace(None);
                 win_done.imp().is_recording.set(false);
                 win_done.imp().is_paused.set(false);
+                elapsed_done.set(0);
+                osd_text_done.set_text("STBY  00:00:00");
+                osd_dot_done.set_css_classes(&["camera-osd-dot", "standby"]);
                 preview_done.set_recording_state(false, false);
                 btn_p_done.set_active(false);
                 btn_r_done.set_sensitive(true);
-                status_done.set_text("Recording saved to Videos/");
-                toast_done.add_toast(adw::Toast::new("Recording saved to Videos folder"));
+                status_done.set_text("Recording saved to Videos folder");
+                toast_done.add_toast(adw::Toast::new("Video successfully saved to Videos folder"));
             });
         });
 

@@ -142,17 +142,21 @@ pub struct CompositorPipeline {
 
 impl CompositorPipeline {
     pub fn new(
-        screen_fd: RawFd,
-        screen_node: u32,
+        screen_stream: Option<(RawFd, u32)>,
+        webcam_device: Option<String>,
         enable_microphone: bool,
-        _layout: LayoutPreset,
+        layout: LayoutPreset,
         _shape: WebcamShape,
         codec: VideoCodec,
         container: ContainerFormat,
         output_path: PathBuf,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let (encoder_name, is_hw, backend_label) = detect_encoder(&codec);
-        let muxer_name = get_muxer_for_container(&container);
+        let muxer_spec = match container {
+            ContainerFormat::Mp4 => "mp4mux faststart=true fragment-duration=1000",
+            ContainerFormat::WebM => "webmmux",
+            ContainerFormat::Mkv => "matroskamux",
+        };
 
         // Configure pre-encoder GPU/CPU pipeline stages and parser elements per codec
         let (pre_encode, encoder_opts, post_encode) = match encoder_name.as_str() {
@@ -228,29 +232,127 @@ impl CompositorPipeline {
                 "opusenc"
             };
             format!(
-                "pulsesrc do-timestamp=true ! audioconvert ! audioresample ! queue ! {} ! queue ! mux.",
+                " pulsesrc do-timestamp=true ! audioconvert ! audioresample ! queue ! {} ! queue ! mux.",
                 audio_enc
             )
         } else {
             String::new()
         };
 
-        let launch_str = format!(
-            "pipewiresrc fd={fd} path={node} do-timestamp=true ! videoconvert ! tee name=t \
-             t. ! queue ! {pre} ! {enc} {enc_opts} {post} ! queue ! {mux} name=mux ! filesink location=\"{loc}\" \
-             t. ! queue max-size-buffers=1 leaky=downstream ! videoconvert ! videoscale ! video/x-raw,format=RGBA,width=960,height=540 ! appsink name=previewsink max-buffers=1 drop=true sync=false \
-             {audio}",
-            fd = screen_fd,
-            node = screen_node,
-            pre = pre_encode,
-            enc = encoder_name,
-            enc_opts = encoder_opts,
-            post = post_encode,
-            mux = muxer_name,
-            loc = out_loc,
-            audio = audio_branch,
-        );
+        let video_branch = match layout {
+            LayoutPreset::CameraOnly => {
+                let dev = webcam_device.unwrap_or_else(|| "/dev/video0".to_string());
+                format!(
+                    "v4l2src device={dev} ! videoconvert ! tee name=t \
+                     t. ! queue ! {pre} ! {enc} {enc_opts} {post} ! queue ! {mux} name=mux ! filesink location=\"{loc}\" \
+                     t. ! queue max-size-buffers=1 leaky=downstream ! videoconvert ! video/x-raw,format=RGBA ! appsink name=previewsink max-buffers=1 drop=true sync=false",
+                    dev = dev,
+                    pre = pre_encode,
+                    enc = encoder_name,
+                    enc_opts = encoder_opts,
+                    post = post_encode,
+                    mux = muxer_spec,
+                    loc = out_loc,
+                )
+            }
+            LayoutPreset::ScreenOnly => {
+                let (fd, node) = screen_stream
+                    .ok_or("Screen stream required for Screen Only recording")?;
+                format!(
+                    "pipewiresrc fd={fd} path={node} do-timestamp=true ! videoconvert ! tee name=t \
+                     t. ! queue ! {pre} ! {enc} {enc_opts} {post} ! queue ! {mux} name=mux ! filesink location=\"{loc}\" \
+                     t. ! queue max-size-buffers=1 leaky=downstream ! videoconvert ! video/x-raw,format=RGBA ! appsink name=previewsink max-buffers=1 drop=true sync=false",
+                    fd = fd,
+                    node = node,
+                    pre = pre_encode,
+                    enc = encoder_name,
+                    enc_opts = encoder_opts,
+                    post = post_encode,
+                    mux = muxer_spec,
+                    loc = out_loc,
+                )
+            }
+            LayoutPreset::DesktopPiP => {
+                if let (Some((fd, node)), Some(dev)) = (screen_stream, webcam_device.as_deref()) {
+                    format!(
+                        "compositor name=comp background=black \
+                           sink_0::xpos=0 sink_0::ypos=0 sink_0::width=1920 sink_0::height=1080 \
+                           sink_1::xpos=1420 sink_1::ypos=760 sink_1::width=460 sink_1::height=280 ! \
+                         videoconvert ! tee name=t \
+                         t. ! queue ! {pre} ! {enc} {enc_opts} {post} ! queue ! {mux} name=mux ! filesink location=\"{loc}\" \
+                         t. ! queue max-size-buffers=1 leaky=downstream ! videoconvert ! video/x-raw,format=RGBA ! appsink name=previewsink max-buffers=1 drop=true sync=false \
+                         pipewiresrc fd={fd} path={node} do-timestamp=true ! videoconvert ! comp.sink_0 \
+                         v4l2src device={dev} ! videoconvert ! comp.sink_1",
+                        fd = fd,
+                        node = node,
+                        dev = dev,
+                        pre = pre_encode,
+                        enc = encoder_name,
+                        enc_opts = encoder_opts,
+                        post = post_encode,
+                        mux = muxer_spec,
+                        loc = out_loc,
+                    )
+                } else if let Some((fd, node)) = screen_stream {
+                    format!(
+                        "pipewiresrc fd={fd} path={node} do-timestamp=true ! videoconvert ! tee name=t \
+                         t. ! queue ! {pre} ! {enc} {enc_opts} {post} ! queue ! {mux} name=mux ! filesink location=\"{loc}\" \
+                         t. ! queue max-size-buffers=1 leaky=downstream ! videoconvert ! video/x-raw,format=RGBA ! appsink name=previewsink max-buffers=1 drop=true sync=false",
+                        fd = fd,
+                        node = node,
+                        pre = pre_encode,
+                        enc = encoder_name,
+                        enc_opts = encoder_opts,
+                        post = post_encode,
+                        mux = muxer_spec,
+                        loc = out_loc,
+                    )
+                } else {
+                    return Err("Desktop or Camera stream required for recording".into());
+                }
+            }
+            LayoutPreset::SideBySide => {
+                if let (Some((fd, node)), Some(dev)) = (screen_stream, webcam_device.as_deref()) {
+                    format!(
+                        "compositor name=comp background=black \
+                           sink_0::xpos=0 sink_0::ypos=0 sink_0::width=960 sink_0::height=1080 \
+                           sink_1::xpos=960 sink_1::ypos=0 sink_1::width=960 sink_1::height=1080 ! \
+                         videoconvert ! tee name=t \
+                         t. ! queue ! {pre} ! {enc} {enc_opts} {post} ! queue ! {mux} name=mux ! filesink location=\"{loc}\" \
+                         t. ! queue max-size-buffers=1 leaky=downstream ! videoconvert ! video/x-raw,format=RGBA ! appsink name=previewsink max-buffers=1 drop=true sync=false \
+                         pipewiresrc fd={fd} path={node} do-timestamp=true ! videoconvert ! comp.sink_0 \
+                         v4l2src device={dev} ! videoconvert ! comp.sink_1",
+                        fd = fd,
+                        node = node,
+                        dev = dev,
+                        pre = pre_encode,
+                        enc = encoder_name,
+                        enc_opts = encoder_opts,
+                        post = post_encode,
+                        mux = muxer_spec,
+                        loc = out_loc,
+                    )
+                } else if let Some((fd, node)) = screen_stream {
+                    format!(
+                        "pipewiresrc fd={fd} path={node} do-timestamp=true ! videoconvert ! tee name=t \
+                         t. ! queue ! {pre} ! {enc} {enc_opts} {post} ! queue ! {mux} name=mux ! filesink location=\"{loc}\" \
+                         t. ! queue max-size-buffers=1 leaky=downstream ! videoconvert ! video/x-raw,format=RGBA ! appsink name=previewsink max-buffers=1 drop=true sync=false",
+                        fd = fd,
+                        node = node,
+                        pre = pre_encode,
+                        enc = encoder_name,
+                        enc_opts = encoder_opts,
+                        post = post_encode,
+                        mux = muxer_spec,
+                        loc = out_loc,
+                    )
+                } else {
+                    return Err("Desktop or Camera stream required for recording".into());
+                }
+            }
+        };
 
+        let launch_str = format!("{}{}", video_branch, audio_branch);
         let element = gst::parse::launch(&launch_str)?;
         let pipeline = element
             .dynamic_cast::<gst::Pipeline>()
@@ -337,9 +439,16 @@ impl CompositorPipeline {
     {
         let pipe = self.pipeline.clone();
         thread::spawn(move || {
+            // Send EOS to every source element so encoders and muxers flush and finalize
+            for item in pipe.iterate_sources() {
+                if let Ok(src) = item {
+                    src.send_event(gst::event::Eos::new());
+                }
+            }
             pipe.send_event(gst::event::Eos::new());
+
             if let Some(bus) = pipe.bus() {
-                let deadline = std::time::Instant::now() + Duration::from_millis(1500);
+                let deadline = std::time::Instant::now() + Duration::from_millis(3000);
                 while std::time::Instant::now() < deadline {
                     if let Some(msg) = bus.timed_pop(gst::ClockTime::from_mseconds(100)) {
                         use gst::MessageView;

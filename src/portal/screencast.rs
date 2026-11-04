@@ -13,6 +13,10 @@ pub struct CaptureStream {
 }
 
 impl CaptureStream {
+    pub fn try_clone_fd(&self) -> std::io::Result<OwnedFd> {
+        self.fd.try_clone()
+    }
+
     pub fn raw_fd(&self) -> RawFd {
         self.fd.as_raw_fd()
     }
