@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.antonio.RecGo</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>RecGo</name>
+  <summary>Screen and webcam recorder for GNOME</summary>
+  <description>
+    <p>RecGo is a GTK4/Libadwaita screen, window, and webcam recorder with live draggable webcam shapes, drop shadows, hardware encoding (VP9, H.264, H.265, AV1), and GNOME Shell integration.</p>
+  </description>
+  <launchable type="desktop-id">io.github.antonio.RecGo.desktop</launchable>
+  <developer id="io.github.antonio">
+    <name>Antonio</name>
+  </developer>
+  <releases>
+    <release version="0.1.0" date="2026-11-04"/>
+  </releases>
+  <content_rating type="oars-1.1"/>
+</component>

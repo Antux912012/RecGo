@@ -1,0 +1,509 @@
+// Main application window for RecGo with GPU/VA-API/Vulkan/OpenGL acceleration, live preview, and webcam resizing.
+
+use adw::prelude::*;
+use adw::subclass::prelude::*;
+use ashpd::desktop::screencast::{CursorMode, SourceType};
+use gtk::{gio, glib};
+use std::cell::{Cell, RefCell};
+use std::path::PathBuf;
+use std::rc::Rc;
+use std::time::Duration;
+
+use crate::pipeline::codecs::{
+    detect_gpu_acceleration, get_extension_for_container, get_supported_codecs, CodecInfo,
+    ContainerFormat, VideoCodec,
+};
+use crate::pipeline::compositor::{CompositorPipeline, LayoutPreset, LiveFeedCapture, WebcamShape};
+use crate::portal::screencast::{start_screencast_session, CaptureStream};
+use crate::ui::preferences::PreferencesDialog;
+use crate::ui::preview::RecGoPreview;
+
+mod imp {
+    use super::*;
+
+    #[derive(Default)]
+    pub struct RecGoWindow {
+        pub preview: std::cell::OnceCell<RecGoPreview>,
+        pub pipeline: RefCell<Option<CompositorPipeline>>,
+        pub webcam_feed: RefCell<Option<LiveFeedCapture>>,
+        pub screen_preview_feed: RefCell<Option<LiveFeedCapture>>,
+        pub is_recording: Cell<bool>,
+        pub is_paused: Cell<bool>,
+        pub mic_enabled: Cell<bool>,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for RecGoWindow {
+        const NAME: &'static str = "RecGoWindow";
+        type Type = super::RecGoWindow;
+        type ParentType = adw::ApplicationWindow;
+    }
+
+    impl ObjectImpl for RecGoWindow {}
+    impl WidgetImpl for RecGoWindow {}
+    impl WindowImpl for RecGoWindow {}
+    impl ApplicationWindowImpl for RecGoWindow {}
+    impl AdwApplicationWindowImpl for RecGoWindow {}
+}
+
+glib::wrapper! {
+    pub struct RecGoWindow(ObjectSubclass<imp::RecGoWindow>)
+        @extends gtk::Widget, gtk::Window, gtk::ApplicationWindow,
+                 adw::ApplicationWindow,
+        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget,
+                    gtk::Native, gtk::Root, gtk::ShortcutManager,
+                    gio::ActionGroup, gio::ActionMap;
+}
+
+impl RecGoWindow {
+    pub fn new(app: &impl IsA<gtk::Application>) -> Self {
+        let window: Self = glib::Object::builder()
+            .property("application", app)
+            .property("title", "RecGo")
+            .property("default-width", 1180)
+            .property("default-height", 740)
+            .build();
+
+        window.imp().mic_enabled.set(true);
+
+        let toast_overlay = adw::ToastOverlay::new();
+        let toolbar_view = adw::ToolbarView::new();
+
+        // Top HeaderBar
+        let header = adw::HeaderBar::new();
+
+        let source_dropdown = gtk::DropDown::from_strings(&[
+            "Screen / Monitor",
+            "Application Window",
+        ]);
+        source_dropdown.set_tooltip_text(Some("Select Capture Target"));
+        header.pack_start(&source_dropdown);
+
+        let btn_select_screen = gtk::Button::with_label("Preview Desktop");
+        btn_select_screen.set_tooltip_text(Some("Choose Screen or Window for Live Preview"));
+        header.pack_start(&btn_select_screen);
+
+        let layout_dropdown = gtk::DropDown::from_strings(&[
+            "Desktop + Webcam PiP",
+            "Side by Side (50/50)",
+            "Screen Only",
+            "Camera Only",
+        ]);
+        layout_dropdown.set_tooltip_text(Some("Select Recording Layout"));
+        header.pack_start(&layout_dropdown);
+
+        let shape_dropdown = gtk::DropDown::from_strings(&[
+            "Circle (Shadow)",
+            "Square (Shadow)",
+            "Rectangle (Shadow)",
+        ]);
+        shape_dropdown.set_tooltip_text(Some("Select Webcam Enclosure Shape"));
+        header.pack_start(&shape_dropdown);
+
+        // Hardware/Software Codec Selector in HeaderBar
+        let supported_codecs: Rc<Vec<CodecInfo>> = Rc::new(get_supported_codecs());
+        let codec_labels: Vec<&str> = supported_codecs
+            .iter()
+            .map(|c| c.display_name.as_str())
+            .collect();
+        let codec_dropdown = gtk::DropDown::from_strings(&codec_labels);
+        codec_dropdown.set_tooltip_text(Some("Select GPU Hardware or CPU Video Encoder"));
+        header.pack_start(&codec_dropdown);
+
+        // Microphone Toggle Button in HeaderBar
+        let mic_toggle = gtk::ToggleButton::new();
+        mic_toggle.set_icon_name("audio-input-microphone-symbolic");
+        mic_toggle.set_active(true);
+        mic_toggle.set_tooltip_text(Some("Toggle Microphone Audio Recording"));
+        header.pack_end(&mic_toggle);
+
+        let pref_btn = gtk::Button::from_icon_name("emblem-system-symbolic");
+        pref_btn.set_tooltip_text(Some("GPU & Hardware Encoder Diagnostics"));
+        let win_clone = window.clone();
+        pref_btn.connect_clicked(move |_| {
+            let dialog = PreferencesDialog::new();
+            dialog.present(Some(&win_clone));
+        });
+        header.pack_end(&pref_btn);
+
+        toolbar_view.add_top_bar(&header);
+
+        // Center content: Interactive Live Video & Webcam Enclosure Preview
+        let preview = RecGoPreview::new();
+        window.imp().preview.set(preview.clone()).ok();
+
+        // Start live webcam preview immediately if /dev/video0 is available
+        if let Ok(cam_feed) = LiveFeedCapture::new_webcam("/dev/video0") {
+            window.imp().webcam_feed.replace(Some(cam_feed));
+        }
+
+        let (_gpu_mode, gpu_summary) = detect_gpu_acceleration();
+        let banner_text = format!(
+            "GPU Acceleration Active: {} | Drag webcam to move; drag blue corner handle, scroll wheel, or use slider to resize.",
+            gpu_summary
+        );
+        let status_banner = adw::Banner::new(&banner_text);
+        status_banner.set_revealed(true);
+
+        let content_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        content_box.append(&status_banner);
+        content_box.append(&preview);
+        toolbar_view.set_content(Some(&content_box));
+
+        // 30 FPS UI refresh timer pulling frames from live webcam & desktop feeds
+        let win_timer = window.clone();
+        let preview_timer = preview.clone();
+        glib::timeout_add_local(Duration::from_millis(33), move || {
+            if let Some(ref cam) = *win_timer.imp().webcam_feed.borrow() {
+                if let Some(tex) = cam.latest_texture() {
+                    preview_timer.set_webcam_texture(Some(tex));
+                }
+            }
+            if let Some(ref rec_pipe) = *win_timer.imp().pipeline.borrow() {
+                if let Some(tex) = rec_pipe.latest_screen_texture() {
+                    preview_timer.set_screen_texture(Some(tex));
+                }
+            } else if let Some(ref scr_feed) = *win_timer.imp().screen_preview_feed.borrow() {
+                if let Some(tex) = scr_feed.latest_texture() {
+                    preview_timer.set_screen_texture(Some(tex));
+                }
+            }
+            glib::ControlFlow::Continue
+        });
+
+        // Connect Layout, Shape, and Mic controls
+        let preview_for_layout = preview.clone();
+        layout_dropdown.connect_selected_notify(move |dd| {
+            let preset = match dd.selected() {
+                0 => LayoutPreset::DesktopPiP,
+                1 => LayoutPreset::SideBySide,
+                2 => LayoutPreset::ScreenOnly,
+                _ => LayoutPreset::CameraOnly,
+            };
+            preview_for_layout.set_layout(preset);
+        });
+
+        let preview_for_shape = preview.clone();
+        shape_dropdown.connect_selected_notify(move |dd| {
+            let shape = match dd.selected() {
+                0 => WebcamShape::Circle,
+                1 => WebcamShape::Square,
+                _ => WebcamShape::Rectangle,
+            };
+            preview_for_shape.set_shape(shape);
+        });
+
+        let win_for_mic = window.clone();
+        let toast_for_mic = toast_overlay.clone();
+        mic_toggle.connect_toggled(move |btn| {
+            let enabled = btn.is_active();
+            win_for_mic.imp().mic_enabled.set(enabled);
+            let msg = if enabled {
+                "Microphone enabled"
+            } else {
+                "Microphone muted"
+            };
+            toast_for_mic.add_toast(adw::Toast::new(msg));
+        });
+
+        // Bottom Action Bar: Status, Record/Pause/Stop, and Webcam Size Slider
+        let action_bar = gtk::ActionBar::new();
+
+        let btn_record = gtk::Button::with_label("Record");
+        btn_record.add_css_class("suggested-action");
+        btn_record.add_css_class("pill");
+
+        let btn_pause = gtk::ToggleButton::with_label("Pause");
+        btn_pause.add_css_class("pill");
+        btn_pause.set_sensitive(false);
+
+        let btn_stop = gtk::Button::with_label("Stop");
+        btn_stop.add_css_class("destructive-action");
+        btn_stop.add_css_class("pill");
+        btn_stop.set_sensitive(false);
+
+        let status_label = gtk::Label::new(Some(&format!("Ready ({})", gpu_summary)));
+        status_label.add_css_class("dim-label");
+        action_bar.pack_start(&status_label);
+
+        let box_controls = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+        box_controls.set_halign(gtk::Align::Center);
+        box_controls.append(&btn_record);
+        box_controls.append(&btn_pause);
+        box_controls.append(&btn_stop);
+        action_bar.set_center_widget(Some(&box_controls));
+
+        // Webcam Size Slider on the right side of the bottom bar
+        let size_box = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        let size_label = gtk::Label::new(Some("Webcam Size"));
+        size_label.add_css_class("dim-label");
+        let size_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.10, 0.65, 0.01);
+        size_scale.set_value(0.24);
+        size_scale.set_width_request(150);
+        size_scale.set_tooltip_text(Some("Resize Webcam Overlay"));
+
+        let preview_for_scale = preview.clone();
+        size_scale.connect_value_changed(move |scale| {
+            preview_for_scale.set_overlay_scale(scale.value());
+        });
+
+        size_box.append(&size_label);
+        size_box.append(&size_scale);
+        action_bar.pack_end(&size_box);
+
+        toolbar_view.add_bottom_bar(&action_bar);
+
+        // Shared portal stream holder
+        let active_stream_holder: Rc<RefCell<Option<CaptureStream>>> = Rc::new(RefCell::new(None));
+
+        // Wire "Preview Desktop" Button
+        let stream_holder_prev = active_stream_holder.clone();
+        let win_for_prev = window.clone();
+        let source_dd_prev = source_dropdown.clone();
+        let status_for_prev = status_label.clone();
+        let toast_for_prev = toast_overlay.clone();
+
+        btn_select_screen.connect_clicked(move |_| {
+            let source_type = match source_dd_prev.selected() {
+                0 => SourceType::Monitor,
+                _ => SourceType::Window,
+            };
+            let stream_store = stream_holder_prev.clone();
+            let win_inner = win_for_prev.clone();
+            let status_l = status_for_prev.clone();
+            let toast_inner = toast_for_prev.clone();
+
+            glib::spawn_future_local(async move {
+                status_l.set_text("Selecting desktop or window for live preview...");
+                let (tx, rx) = tokio::sync::oneshot::channel();
+                std::thread::spawn(move || {
+                    let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
+                    let res = rt.block_on(start_screencast_session(
+                        None,
+                        source_type,
+                        CursorMode::Embedded,
+                    ));
+                    let _ = tx.send(res);
+                });
+
+                if let Ok(Ok(stream)) = rx.await {
+                    if let Some(old_preview) = win_inner.imp().screen_preview_feed.borrow_mut().take() {
+                        old_preview.stop_async();
+                    }
+                    match LiveFeedCapture::new_screen(stream.raw_fd(), stream.node_id) {
+                        Ok(feed) => {
+                            win_inner.imp().screen_preview_feed.replace(Some(feed));
+                            status_l.set_text(&format!(
+                                "Live desktop preview active ({}x{})",
+                                stream.width, stream.height
+                            ));
+                            toast_inner.add_toast(adw::Toast::new("Live desktop preview active"));
+                        }
+                        Err(e) => {
+                            status_l.set_text(&format!("Preview error: {}", e));
+                        }
+                    }
+                    stream_store.replace(Some(stream));
+                }
+            });
+        });
+
+        // Wire Record Button
+        let toast_for_rec = toast_overlay.clone();
+        let preview_for_rec = preview.clone();
+        let btn_rec_clone = btn_record.clone();
+        let btn_pause_clone = btn_pause.clone();
+        let btn_stop_clone = btn_stop.clone();
+        let status_for_rec = status_label.clone();
+        let source_dd_clone = source_dropdown.clone();
+        let codec_dd_clone = codec_dropdown.clone();
+        let codecs_list_rec = supported_codecs.clone();
+        let win_for_rec = window.clone();
+        let stream_holder_rec = active_stream_holder.clone();
+
+        btn_record.connect_clicked(move |_| {
+            let source_type = match source_dd_clone.selected() {
+                0 => SourceType::Monitor,
+                _ => SourceType::Window,
+            };
+
+            let selected_idx = codec_dd_clone.selected() as usize;
+            let (chosen_codec, chosen_container) = codecs_list_rec
+                .get(selected_idx)
+                .map(|c| (c.codec, c.container))
+                .unwrap_or((VideoCodec::H264, ContainerFormat::Mp4));
+
+            let toast_inner = toast_for_rec.clone();
+            let preview_inner = preview_for_rec.clone();
+            let btn_r = btn_rec_clone.clone();
+            let btn_p = btn_pause_clone.clone();
+            let btn_s = btn_stop_clone.clone();
+            let status_l = status_for_rec.clone();
+            let stream_store = stream_holder_rec.clone();
+            let win_inner = win_for_rec.clone();
+
+            glib::spawn_future_local(async move {
+                if let Some(prev_feed) = win_inner.imp().screen_preview_feed.borrow_mut().take() {
+                    prev_feed.stop_async();
+                }
+
+                status_l.set_text("Starting GNOME ScreenCast session...");
+                let (tx, rx) = tokio::sync::oneshot::channel();
+                std::thread::spawn(move || {
+                    let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
+                    let res = rt.block_on(start_screencast_session(
+                        None,
+                        source_type,
+                        CursorMode::Embedded,
+                    ));
+                    let _ = tx.send(res);
+                });
+
+                match rx.await {
+                    Ok(Ok(stream)) => {
+                        let out_dir = glib::user_special_dir(glib::UserDirectory::Videos)
+                            .unwrap_or_else(|| PathBuf::from("/tmp"));
+                        let timestamp = glib::DateTime::now_local()
+                            .and_then(|dt| dt.format("%Y-%m-%d_%H-%M-%S"))
+                            .unwrap_or_else(|_| "output".into());
+                        let ext = get_extension_for_container(&chosen_container);
+                        let out_file = out_dir.join(format!("RecGo-{}.{}", timestamp, ext));
+
+                        let mic_on = win_inner.imp().mic_enabled.get();
+
+                        match CompositorPipeline::new(
+                            stream.raw_fd(),
+                            stream.node_id,
+                            mic_on,
+                            preview_inner.layout(),
+                            preview_inner.shape(),
+                            chosen_codec,
+                            chosen_container,
+                            out_file.clone(),
+                        ) {
+                            Ok(pipeline) => {
+                                if let Err(err) = pipeline.start() {
+                                    status_l.set_text(&format!("Pipeline start error: {}", err));
+                                    toast_inner.add_toast(adw::Toast::new(&format!(
+                                        "Failed to start pipeline: {}",
+                                        err
+                                    )));
+                                    return;
+                                }
+                                let enc_desc = pipeline.encoder_description.clone();
+                                win_inner.imp().pipeline.replace(Some(pipeline));
+                                stream_store.replace(Some(stream));
+                                win_inner.imp().is_recording.set(true);
+                                win_inner.imp().is_paused.set(false);
+                                preview_inner.set_recording_state(true, false);
+                                btn_r.set_sensitive(false);
+                                btn_p.set_sensitive(true);
+                                btn_s.set_sensitive(true);
+                                status_l.set_text(&format!(
+                                    "Recording [{}] -> {}",
+                                    enc_desc,
+                                    out_file.display()
+                                ));
+                                toast_inner.add_toast(adw::Toast::new(&format!(
+                                    "Recording with {}",
+                                    enc_desc
+                                )));
+                            }
+                            Err(err) => {
+                                status_l.set_text(&format!("Pipeline build error: {}", err));
+                                toast_inner.add_toast(adw::Toast::new(&format!(
+                                    "GStreamer error: {}",
+                                    err
+                                )));
+                            }
+                        }
+                    }
+                    Ok(Err(err)) => {
+                        status_l.set_text("Portal request cancelled or failed");
+                        toast_inner.add_toast(adw::Toast::new(&format!(
+                            "ScreenCast Portal: {}",
+                            err
+                        )));
+                    }
+                    Err(_) => {
+                        status_l.set_text("Portal channel closed");
+                    }
+                }
+            });
+        });
+
+        // Wire Pause Button
+        let win_for_pause = window.clone();
+        let preview_for_pause = preview.clone();
+        let status_for_pause = status_label.clone();
+        let toast_for_pause = toast_overlay.clone();
+        btn_pause.connect_toggled(move |btn| {
+            let paused = btn.is_active();
+            win_for_pause.imp().is_paused.set(paused);
+            preview_for_pause.set_recording_state(true, paused);
+            if let Some(ref pipe) = *win_for_pause.imp().pipeline.borrow() {
+                if paused {
+                    let _ = pipe.pause();
+                } else {
+                    let _ = pipe.resume();
+                }
+            }
+            if paused {
+                status_for_pause.set_text("Recording Paused");
+                toast_for_pause.add_toast(adw::Toast::new("Recording paused"));
+            } else {
+                status_for_pause.set_text("Recording Resumed");
+                toast_for_pause.add_toast(adw::Toast::new("Recording resumed"));
+            }
+        });
+
+        // Wire Stop Button
+        let win_for_stop = window.clone();
+        let preview_for_stop = preview.clone();
+        let btn_rec_stop = btn_record.clone();
+        let btn_pause_stop = btn_pause.clone();
+        let btn_stop_self = btn_stop.clone();
+        let status_for_stop = status_label.clone();
+        let toast_for_stop = toast_overlay.clone();
+        let stream_holder_stop = active_stream_holder.clone();
+
+        btn_stop.connect_clicked(move |_| {
+            status_for_stop.set_text("Finalizing recording file...");
+            btn_stop_self.set_sensitive(false);
+            btn_pause_stop.set_sensitive(false);
+
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            if let Some(pipe) = win_for_stop.imp().pipeline.borrow_mut().take() {
+                pipe.stop_async(move || {
+                    let _ = tx.send(());
+                });
+            } else {
+                let _ = tx.send(());
+            }
+
+            let win_done = win_for_stop.clone();
+            let preview_done = preview_for_stop.clone();
+            let btn_r_done = btn_rec_stop.clone();
+            let btn_p_done = btn_pause_stop.clone();
+            let status_done = status_for_stop.clone();
+            let toast_done = toast_for_stop.clone();
+            let stream_done = stream_holder_stop.clone();
+
+            glib::spawn_future_local(async move {
+                let _ = rx.await;
+                stream_done.replace(None);
+                win_done.imp().is_recording.set(false);
+                win_done.imp().is_paused.set(false);
+                preview_done.set_recording_state(false, false);
+                btn_p_done.set_active(false);
+                btn_r_done.set_sensitive(true);
+                status_done.set_text("Recording saved to Videos/");
+                toast_done.add_toast(adw::Toast::new("Recording saved to Videos folder"));
+            });
+        });
+
+        toast_overlay.set_child(Some(&toolbar_view));
+        window.set_content(Some(&toast_overlay));
+        window
+    }
+}
