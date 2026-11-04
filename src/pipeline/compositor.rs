@@ -9,7 +9,7 @@ use std::thread;
 use std::time::Duration;
 
 use crate::pipeline::codecs::{
-    detect_encoder, get_muxer_for_container, has_element, ContainerFormat, VideoCodec,
+    detect_encoder, has_element, ContainerFormat, VideoCodec,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -143,10 +143,13 @@ pub struct CompositorPipeline {
 impl CompositorPipeline {
     pub fn new(
         screen_stream: Option<(RawFd, u32)>,
+        screen_resolution: Option<(u32, u32)>,
         webcam_device: Option<String>,
+        overlay_pos: (f64, f64),
+        overlay_scale: f64,
         enable_microphone: bool,
         layout: LayoutPreset,
-        _shape: WebcamShape,
+        shape: WebcamShape,
         codec: VideoCodec,
         container: ContainerFormat,
         output_path: PathBuf,
@@ -239,11 +242,15 @@ impl CompositorPipeline {
             String::new()
         };
 
+        let (screen_w, screen_h) = screen_resolution.unwrap_or((1920, 1080));
+        let screen_w = screen_w.max(640);
+        let screen_h = screen_h.max(480);
+
         let video_branch = match layout {
             LayoutPreset::CameraOnly => {
                 let dev = webcam_device.unwrap_or_else(|| "/dev/video0".to_string());
                 format!(
-                    "v4l2src device={dev} ! videoconvert ! tee name=t \
+                    "v4l2src device={dev} ! queue max-size-buffers=3 leaky=downstream ! videoconvert ! videoscale ! video/x-raw,width=1920,height=1080 ! tee name=t \
                      t. ! queue ! {pre} ! {enc} {enc_opts} {post} ! queue ! {mux} name=mux ! filesink location=\"{loc}\" \
                      t. ! queue max-size-buffers=1 leaky=downstream ! videoconvert ! video/x-raw,format=RGBA ! appsink name=previewsink max-buffers=1 drop=true sync=false",
                     dev = dev,
@@ -259,11 +266,13 @@ impl CompositorPipeline {
                 let (fd, node) = screen_stream
                     .ok_or("Screen stream required for Screen Only recording")?;
                 format!(
-                    "pipewiresrc fd={fd} path={node} do-timestamp=true ! videoconvert ! tee name=t \
+                    "pipewiresrc fd={fd} path={node} do-timestamp=true ! queue max-size-buffers=3 leaky=downstream ! videoconvert ! videoscale ! video/x-raw,width={screen_w},height={screen_h} ! tee name=t \
                      t. ! queue ! {pre} ! {enc} {enc_opts} {post} ! queue ! {mux} name=mux ! filesink location=\"{loc}\" \
                      t. ! queue max-size-buffers=1 leaky=downstream ! videoconvert ! video/x-raw,format=RGBA ! appsink name=previewsink max-buffers=1 drop=true sync=false",
                     fd = fd,
                     node = node,
+                    screen_w = screen_w,
+                    screen_h = screen_h,
                     pre = pre_encode,
                     enc = encoder_name,
                     enc_opts = encoder_opts,
@@ -274,18 +283,51 @@ impl CompositorPipeline {
             }
             LayoutPreset::DesktopPiP => {
                 if let (Some((fd, node)), Some(dev)) = (screen_stream, webcam_device.as_deref()) {
+                    let (ox, oy) = overlay_pos;
+                    let (cam_w_f, cam_h_f) = match shape {
+                        WebcamShape::Circle | WebcamShape::Square => {
+                            let side = ((screen_w as f64) * overlay_scale).clamp(120.0, (screen_h as f64) * 0.85);
+                            (side, side)
+                        }
+                        WebcamShape::Rectangle => {
+                            let w = ((screen_w as f64) * overlay_scale * 1.3).clamp(160.0, (screen_w as f64) * 0.85);
+                            let h = w * 9.0 / 16.0;
+                            (w, h)
+                        }
+                    };
+
+                    let max_x = ((screen_w as f64) - cam_w_f).max(0.0);
+                    let max_y = ((screen_h as f64) - cam_h_f).max(0.0);
+                    let cam_x = (ox * max_x).clamp(0.0, max_x).round() as i32;
+                    let cam_y = (oy * max_y).clamp(0.0, max_y).round() as i32;
+                    let cam_w = (cam_w_f.round() as i32).max(64);
+                    let cam_h = (cam_h_f.round() as i32).max(64);
+
+                    let border_px = 4;
+                    let framed_w = cam_w + border_px * 2;
+                    let framed_h = cam_h + border_px * 2;
+
                     format!(
                         "compositor name=comp background=black \
-                           sink_0::xpos=0 sink_0::ypos=0 sink_0::width=1920 sink_0::height=1080 \
-                           sink_1::xpos=1420 sink_1::ypos=760 sink_1::width=460 sink_1::height=280 ! \
+                           sink_0::xpos=0 sink_0::ypos=0 sink_0::width={screen_w} sink_0::height={screen_h} \
+                           sink_1::xpos={cam_x} sink_1::ypos={cam_y} sink_1::width={framed_w} sink_1::height={framed_h} ! \
                          videoconvert ! tee name=t \
                          t. ! queue ! {pre} ! {enc} {enc_opts} {post} ! queue ! {mux} name=mux ! filesink location=\"{loc}\" \
                          t. ! queue max-size-buffers=1 leaky=downstream ! videoconvert ! video/x-raw,format=RGBA ! appsink name=previewsink max-buffers=1 drop=true sync=false \
-                         pipewiresrc fd={fd} path={node} do-timestamp=true ! queue max-size-buffers=3 leaky=downstream ! videoconvert ! videoscale ! comp.sink_0 \
-                         v4l2src device={dev} ! queue max-size-buffers=3 leaky=downstream ! videoconvert ! videoscale ! comp.sink_1",
+                         pipewiresrc fd={fd} path={node} do-timestamp=true ! queue max-size-buffers=3 leaky=downstream ! videoconvert ! videoscale ! video/x-raw,width={screen_w},height={screen_h} ! comp.sink_0 \
+                         v4l2src device={dev} ! queue max-size-buffers=3 leaky=downstream ! videoconvert ! videoscale ! video/x-raw,width={cam_w},height={cam_h} ! videobox left=-{border_px} right=-{border_px} top=-{border_px} bottom=-{border_px} fill=white border-alpha=1.0 ! comp.sink_1",
                         fd = fd,
                         node = node,
                         dev = dev,
+                        screen_w = screen_w,
+                        screen_h = screen_h,
+                        cam_x = cam_x,
+                        cam_y = cam_y,
+                        framed_w = framed_w,
+                        framed_h = framed_h,
+                        cam_w = cam_w,
+                        cam_h = cam_h,
+                        border_px = border_px,
                         pre = pre_encode,
                         enc = encoder_name,
                         enc_opts = encoder_opts,
@@ -295,11 +337,13 @@ impl CompositorPipeline {
                     )
                 } else if let Some((fd, node)) = screen_stream {
                     format!(
-                        "pipewiresrc fd={fd} path={node} do-timestamp=true ! queue max-size-buffers=3 leaky=downstream ! videoconvert ! tee name=t \
+                        "pipewiresrc fd={fd} path={node} do-timestamp=true ! queue max-size-buffers=3 leaky=downstream ! videoconvert ! videoscale ! video/x-raw,width={screen_w},height={screen_h} ! tee name=t \
                          t. ! queue ! {pre} ! {enc} {enc_opts} {post} ! queue ! {mux} name=mux ! filesink location=\"{loc}\" \
                          t. ! queue max-size-buffers=1 leaky=downstream ! videoconvert ! video/x-raw,format=RGBA ! appsink name=previewsink max-buffers=1 drop=true sync=false",
                         fd = fd,
                         node = node,
+                        screen_w = screen_w,
+                        screen_h = screen_h,
                         pre = pre_encode,
                         enc = encoder_name,
                         enc_opts = encoder_opts,
@@ -312,19 +356,28 @@ impl CompositorPipeline {
                 }
             }
             LayoutPreset::SideBySide => {
+                let half_w = screen_w / 2;
                 if let (Some((fd, node)), Some(dev)) = (screen_stream, webcam_device.as_deref()) {
+                    let border_px = 3;
+                    let inner_w = (half_w - border_px * 2).max(64);
+                    let inner_h = (screen_h - border_px * 2).max(64);
                     format!(
                         "compositor name=comp background=black \
-                           sink_0::xpos=0 sink_0::ypos=0 sink_0::width=960 sink_0::height=1080 \
-                           sink_1::xpos=960 sink_1::ypos=0 sink_1::width=960 sink_1::height=1080 ! \
+                           sink_0::xpos=0 sink_0::ypos=0 sink_0::width={half_w} sink_0::height={screen_h} \
+                           sink_1::xpos={half_w} sink_1::ypos=0 sink_1::width={half_w} sink_1::height={screen_h} ! \
                          videoconvert ! tee name=t \
                          t. ! queue ! {pre} ! {enc} {enc_opts} {post} ! queue ! {mux} name=mux ! filesink location=\"{loc}\" \
                          t. ! queue max-size-buffers=1 leaky=downstream ! videoconvert ! video/x-raw,format=RGBA ! appsink name=previewsink max-buffers=1 drop=true sync=false \
-                         pipewiresrc fd={fd} path={node} do-timestamp=true ! queue max-size-buffers=3 leaky=downstream ! videoconvert ! videoscale ! comp.sink_0 \
-                         v4l2src device={dev} ! queue max-size-buffers=3 leaky=downstream ! videoconvert ! videoscale ! comp.sink_1",
+                         pipewiresrc fd={fd} path={node} do-timestamp=true ! queue max-size-buffers=3 leaky=downstream ! videoconvert ! videoscale ! video/x-raw,width={half_w},height={screen_h} ! comp.sink_0 \
+                         v4l2src device={dev} ! queue max-size-buffers=3 leaky=downstream ! videoconvert ! videoscale ! video/x-raw,width={inner_w},height={inner_h} ! videobox left=-{border_px} right=-{border_px} top=-{border_px} bottom=-{border_px} fill=white border-alpha=1.0 ! comp.sink_1",
                         fd = fd,
                         node = node,
                         dev = dev,
+                        half_w = half_w,
+                        screen_h = screen_h,
+                        inner_w = inner_w,
+                        inner_h = inner_h,
+                        border_px = border_px,
                         pre = pre_encode,
                         enc = encoder_name,
                         enc_opts = encoder_opts,
@@ -334,11 +387,13 @@ impl CompositorPipeline {
                     )
                 } else if let Some((fd, node)) = screen_stream {
                     format!(
-                        "pipewiresrc fd={fd} path={node} do-timestamp=true ! queue max-size-buffers=3 leaky=downstream ! videoconvert ! tee name=t \
+                        "pipewiresrc fd={fd} path={node} do-timestamp=true ! queue max-size-buffers=3 leaky=downstream ! videoconvert ! videoscale ! video/x-raw,width={screen_w},height={screen_h} ! tee name=t \
                          t. ! queue ! {pre} ! {enc} {enc_opts} {post} ! queue ! {mux} name=mux ! filesink location=\"{loc}\" \
                          t. ! queue max-size-buffers=1 leaky=downstream ! videoconvert ! video/x-raw,format=RGBA ! appsink name=previewsink max-buffers=1 drop=true sync=false",
                         fd = fd,
                         node = node,
+                        screen_w = screen_w,
+                        screen_h = screen_h,
                         pre = pre_encode,
                         enc = encoder_name,
                         enc_opts = encoder_opts,

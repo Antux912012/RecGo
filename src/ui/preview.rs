@@ -25,6 +25,7 @@ mod imp {
         pub screen_texture: RefCell<Option<gdk::MemoryTexture>>,
         pub webcam_texture: RefCell<Option<gdk::MemoryTexture>>,
         pub last_cam_bounds: Cell<(f32, f32, f32, f32)>,
+        pub countdown: Cell<Option<u32>>,
     }
 
     impl Default for RecGoPreview {
@@ -44,6 +45,7 @@ mod imp {
                 screen_texture: RefCell::new(None),
                 webcam_texture: RefCell::new(None),
                 last_cam_bounds: Cell::new((0.0, 0.0, 160.0, 160.0)),
+                countdown: Cell::new(None),
             }
         }
     }
@@ -151,6 +153,61 @@ mod imp {
                     self.draw_webcam_enclosure(snapshot, pad, pad, stage_w, stage_h);
                 }
             }
+
+            // Draw prominent countdown timer overlay on top of viewfinder if counting down
+            if let Some(sec) = self.countdown.get() {
+                let badge_radius = 70.0_f32;
+                let cx = width / 2.0;
+                let cy = height / 2.0;
+                let badge_rect = graphene::Rect::new(
+                    cx - badge_radius,
+                    cy - badge_radius,
+                    badge_radius * 2.0,
+                    badge_radius * 2.0,
+                );
+                let badge_rounded = gsk::RoundedRect::from_rect(badge_rect, badge_radius);
+
+                snapshot.append_outset_shadow(
+                    &badge_rounded,
+                    &gdk::RGBA::new(0.0, 0.0, 0.0, 0.85),
+                    0.0,
+                    10.0,
+                    4.0,
+                    24.0,
+                );
+
+                snapshot.push_rounded_clip(&badge_rounded);
+                snapshot.append_color(&gdk::RGBA::new(0.08, 0.10, 0.14, 0.92), &badge_rect);
+                snapshot.pop();
+
+                snapshot.append_border(
+                    &badge_rounded,
+                    &[4.0; 4],
+                    &[gdk::RGBA::new(0.93, 0.20, 0.23, 0.95); 4],
+                );
+
+                let pango_ctx = widget.pango_context();
+                let text_layout = gtk::pango::Layout::new(&pango_ctx);
+                let text = if sec > 60 {
+                    format!("{}:{:02}", sec / 60, sec % 60)
+                } else {
+                    format!("{}", sec)
+                };
+                text_layout.set_text(&text);
+                let mut font_desc = gtk::pango::FontDescription::new();
+                font_desc.set_family("sans-serif");
+                font_desc.set_weight(gtk::pango::Weight::Heavy);
+                font_desc.set_size(if sec >= 100 { 30 * gtk::pango::SCALE } else { 46 * gtk::pango::SCALE });
+                text_layout.set_font_description(Some(&font_desc));
+
+                let (tw, th) = text_layout.pixel_size();
+                let tx = cx - (tw as f32) / 2.0;
+                let ty = cy - (th as f32) / 2.0;
+                snapshot.save();
+                snapshot.translate(&graphene::Point::new(tx, ty));
+                snapshot.append_layout(&text_layout, &gdk::RGBA::new(1.0, 1.0, 1.0, 1.0));
+                snapshot.restore();
+            }
         }
     }
 
@@ -222,7 +279,10 @@ mod imp {
                     graphene::Rect::new(x, y - offset_y, cam_w, draw_h)
                 };
                 snapshot.append_texture(cam_tex, &draw_rect);
-            } else {
+            } else if !self.is_recording.get() {
+                // When recording without independent webcam preview, the composited
+                // live feed from CompositorPipeline already renders the webcam inside screen_texture.
+                // Do not draw an opaque placeholder box over the live recording view.
                 snapshot.append_color(&gdk::RGBA::new(0.18, 0.34, 0.40, 1.0), &cam_rect);
             }
 
@@ -235,29 +295,30 @@ mod imp {
                 &[gdk::RGBA::new(1.0, 1.0, 1.0, 0.90); 4],
             );
 
-            // Draw interactive resize grip handle in the bottom-right corner of the webcam enclosure
-            let handle_size = 16.0_f32;
-            let (hx, hy) = match shape {
-                WebcamShape::Circle => {
-                    // Place handle on the 45-degree bottom-right rim of the circle
-                    let r = cam_w / 2.0;
-                    let cx = x + r;
-                    let cy = y + r;
-                    let offset = r * 0.7071;
-                    (cx + offset - handle_size / 2.0, cy + offset - handle_size / 2.0)
-                }
-                _ => (x + cam_w - handle_size * 0.75, y + cam_h - handle_size * 0.75),
-            };
-            let handle_rect = graphene::Rect::new(hx, hy, handle_size, handle_size);
-            let handle_rounded = gsk::RoundedRect::from_rect(handle_rect, handle_size / 2.0);
-            snapshot.push_rounded_clip(&handle_rounded);
-            snapshot.append_color(&gdk::RGBA::new(0.21, 0.52, 0.89, 1.0), &handle_rect);
-            snapshot.pop();
-            snapshot.append_border(
-                &handle_rounded,
-                &[2.0; 4],
-                &[gdk::RGBA::new(1.0, 1.0, 1.0, 0.95); 4],
-            );
+            // Draw interactive resize grip handle when not recording
+            if !self.is_recording.get() {
+                let handle_size = 16.0_f32;
+                let (hx, hy) = match shape {
+                    WebcamShape::Circle => {
+                        let r = cam_w / 2.0;
+                        let cx = x + r;
+                        let cy = y + r;
+                        let offset = r * 0.7071;
+                        (cx + offset - handle_size / 2.0, cy + offset - handle_size / 2.0)
+                    }
+                    _ => (x + cam_w - handle_size * 0.75, y + cam_h - handle_size * 0.75),
+                };
+                let handle_rect = graphene::Rect::new(hx, hy, handle_size, handle_size);
+                let handle_rounded = gsk::RoundedRect::from_rect(handle_rect, handle_size / 2.0);
+                snapshot.push_rounded_clip(&handle_rounded);
+                snapshot.append_color(&gdk::RGBA::new(0.21, 0.52, 0.89, 1.0), &handle_rect);
+                snapshot.pop();
+                snapshot.append_border(
+                    &handle_rounded,
+                    &[2.0; 4],
+                    &[gdk::RGBA::new(1.0, 1.0, 1.0, 0.95); 4],
+                );
+            }
         }
     }
 }
@@ -334,6 +395,19 @@ impl RecGoPreview {
 
     pub fn overlay_scale(&self) -> f64 {
         self.imp().overlay_scale.get()
+    }
+
+    pub fn overlay_x(&self) -> f64 {
+        self.imp().overlay_x.get()
+    }
+
+    pub fn overlay_y(&self) -> f64 {
+        self.imp().overlay_y.get()
+    }
+
+    pub fn set_countdown(&self, sec: Option<u32>) {
+        self.imp().countdown.set(sec);
+        self.queue_draw();
     }
 
     pub fn set_webcam_texture(&self, tex: Option<gdk::MemoryTexture>) {

@@ -31,9 +31,16 @@ glib::wrapper! {
 }
 
 impl PreferencesDialog {
-    pub fn new<F>(current_codec_idx: usize, on_codec_changed: F) -> Self
+    pub fn new<F, G>(
+        current_codec_idx: usize,
+        countdown_secs: u32,
+        custom_countdown_secs: u32,
+        on_codec_changed: F,
+        on_countdown_changed: G,
+    ) -> Self
     where
         F: Fn(usize) + 'static,
+        G: Fn(u32, u32) + 'static,
     {
         let dialog: Self = glib::Object::builder().build();
         dialog.set_title("Preferences & Diagnostics");
@@ -42,6 +49,75 @@ impl PreferencesDialog {
         let rec_page = adw::PreferencesPage::new();
         rec_page.set_title("Recording");
         rec_page.set_icon_name(Some("media-record-symbolic"));
+
+        // Countdown settings group
+        let cd_group = adw::PreferencesGroup::new();
+        cd_group.set_title("Countdown Before Recording");
+        cd_group.set_description(Some(
+            "Prepare before capturing starts with an automatic countdown timer.",
+        ));
+
+        let cd_options = [
+            "No Delay (0s)",
+            "3 seconds",
+            "5 seconds",
+            "10 seconds",
+            "Custom Duration (up to 5 min)",
+        ];
+        let cd_string_list = gtk::StringList::new(&cd_options);
+        let cd_combo_row = adw::ComboRow::new();
+        cd_combo_row.set_title("Countdown Preset");
+        cd_combo_row.set_subtitle("Time delay after pressing Record");
+        cd_combo_row.set_model(Some(&cd_string_list));
+
+        let initial_cd_idx = match countdown_secs {
+            0 => 0,
+            3 => 1,
+            5 => 2,
+            10 => 3,
+            _ => 4,
+        };
+        cd_combo_row.set_selected(initial_cd_idx);
+
+        let spin_row = adw::SpinRow::with_range(1.0, 300.0, 1.0);
+        spin_row.set_title("Custom Duration (seconds)");
+        spin_row.set_subtitle("Configurable from 1 second up to 300 seconds (5 minutes)");
+        let initial_spin_val = if countdown_secs != 0 && countdown_secs != 3 && countdown_secs != 5 && countdown_secs != 10 {
+            countdown_secs as f64
+        } else {
+            custom_countdown_secs as f64
+        };
+        spin_row.set_value(initial_spin_val.clamp(1.0, 300.0));
+        spin_row.set_visible(initial_cd_idx == 4);
+
+        let on_cd_cb = std::rc::Rc::new(on_countdown_changed);
+        let spin_row_for_combo = spin_row.clone();
+        let cb_for_combo = on_cd_cb.clone();
+        cd_combo_row.connect_selected_notify(move |row| {
+            let selected = row.selected();
+            spin_row_for_combo.set_visible(selected == 4);
+            let secs = match selected {
+                0 => 0,
+                1 => 3,
+                2 => 5,
+                3 => 10,
+                _ => spin_row_for_combo.value() as u32,
+            };
+            cb_for_combo(secs, spin_row_for_combo.value() as u32);
+        });
+
+        let cb_for_spin = on_cd_cb.clone();
+        let combo_for_spin = cd_combo_row.clone();
+        spin_row.adjustment().connect_value_changed(move |adj| {
+            if combo_for_spin.selected() == 4 {
+                let val = adj.value() as u32;
+                cb_for_spin(val, val);
+            }
+        });
+
+        cd_group.add(&cd_combo_row);
+        cd_group.add(&spin_row);
+        rec_page.add(&cd_group);
 
         let enc_choice_group = adw::PreferencesGroup::new();
         enc_choice_group.set_title("Video Encoder &amp; Container Format");

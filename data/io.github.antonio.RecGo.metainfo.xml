@@ -16,6 +16,11 @@
   <url type="bugtracker">https://github.com/Antux912012/RecGo/issues</url>
   <url type="vcs-browser">https://github.com/Antux912012/RecGo</url>
   <releases>
+    <release version="0.1.2" date="2026-11-04">
+      <description>
+        <p>Added countdown timer option before recording (3s, 5s, 10s, or custom up to 5 minutes) and preserved webcam frame and live view framing in recorded videos.</p>
+      </description>
+    </release>
     <release version="0.1.1" date="2026-11-04">
       <description>
         <p>Fix crash on recording trigger by resolving PipeWire socket contention and V4L2 device conflicts.</p>
