@@ -30,6 +30,14 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.1.6" date="2026-11-13">
+      <description>
+        <p>Release v0.1.6 bundles Papirus symbolic icons inside the application resource archive:</p>
+        <ul>
+          <li>Bundled Symbolic Icons: Embeds required Papirus symbolic SVG icons via GResource so header bar and transport controls render regardless of the host desktop icon theme.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.5" date="2026-11-13">
       <description>
         <p>Release v0.1.5 refreshes the visual identity and standardizes Flatpak AppStream packaging:</p>

@@ -1,0 +1,26 @@
+[Icon Theme]
+Name=Papirus
+Comment=RecGo Bundled Papirus Symbolic Fallback Theme
+Inherits=hicolor
+Directories=scalable/actions,scalable/categories,scalable/devices
+
+[scalable/actions]
+Context=Actions
+Size=16
+MinSize=8
+MaxSize=512
+Type=Scalable
+
+[scalable/categories]
+Context=Categories
+Size=16
+MinSize=8
+MaxSize=512
+Type=Scalable
+
+[scalable/devices]
+Context=Devices
+Size=16
+MinSize=8
+MaxSize=512
+Type=Scalable

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gresources>
+  <gresource prefix="/io/github/Antux912012/RecGo/icons/papirus">
+    <file alias="index.theme">icons/papirus/index.theme</file>
+    <file alias="scalable/actions/media-playback-pause-symbolic.svg">icons/papirus/scalable/actions/media-playback-pause-symbolic.svg</file>
+    <file alias="scalable/actions/media-playback-stop-symbolic.svg">icons/papirus/scalable/actions/media-playback-stop-symbolic.svg</file>
+    <file alias="scalable/actions/media-record-symbolic.svg">icons/papirus/scalable/actions/media-record-symbolic.svg</file>
+    <file alias="scalable/actions/open-menu-symbolic.svg">icons/papirus/scalable/actions/open-menu-symbolic.svg</file>
+    <file alias="scalable/actions/window-close-symbolic.svg">icons/papirus/scalable/actions/window-close-symbolic.svg</file>
+    <file alias="scalable/categories/preferences-other-symbolic.svg">icons/papirus/scalable/categories/preferences-other-symbolic.svg</file>
+    <file alias="scalable/devices/audio-input-microphone-symbolic.svg">icons/papirus/scalable/devices/audio-input-microphone-symbolic.svg</file>
+    <file alias="scalable/devices/camera-web-symbolic.svg">icons/papirus/scalable/devices/camera-web-symbolic.svg</file>
+    <file alias="scalable/devices/video-display-symbolic.svg">icons/papirus/scalable/devices/video-display-symbolic.svg</file>
+  </gresource>
+</gresources>

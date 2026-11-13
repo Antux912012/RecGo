@@ -34,11 +34,28 @@ mod imp {
 
         fn startup(&self) {
             self.parent_startup();
+            register_bundled_icons();
         }
     }
 
     impl GtkApplicationImpl for RecGoApplication {}
     impl AdwApplicationImpl for RecGoApplication {}
+}
+
+/// Registers the embedded Papirus symbolic icon GResource as a fallback icon path.
+///
+/// Runs on the GTK main thread during `ApplicationImpl::startup`.
+fn register_bundled_icons() {
+    const GRESOURCE_BYTES: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/recgo.gresource"));
+    let bytes = glib::Bytes::from_static(GRESOURCE_BYTES);
+    if let Ok(resource) = gio::Resource::from_data(&bytes) {
+        gio::resources_register(&resource);
+    }
+
+    if let Some(display) = gtk::gdk::Display::default() {
+        let icon_theme = gtk::IconTheme::for_display(&display);
+        icon_theme.add_resource_path("/io/github/Antux912012/RecGo/icons/papirus");
+    }
 }
 
 glib::wrapper! {
