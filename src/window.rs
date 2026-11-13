@@ -357,7 +357,7 @@ impl RecGoWindow {
         about_action.connect_activate(move |_, _| {
             let about = adw::AboutDialog::builder()
                 .application_name("RecGo")
-                .application_icon("io.github.antonio.RecGo")
+                .application_icon("io.github.Antux912012.RecGo")
                 .developer_name("Antonio De Gaetano")
                 .version(env!("CARGO_PKG_VERSION"))
                 .comments("High-performance GPU-accelerated desktop and webcam recorder for GNOME.")

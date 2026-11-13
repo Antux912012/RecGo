@@ -18,7 +18,7 @@ impl Default for RecGoControlService {
     }
 }
 
-#[interface(name = "io.github.antonio.RecGo.Control")]
+#[interface(name = "io.github.Antux912012.RecGo.Control")]
 impl RecGoControlService {
     async fn start(&mut self) -> zbus::fdo::Result<bool> {
         self.recording = true;
@@ -60,8 +60,8 @@ impl RecGoControlService {
 pub async fn start_dbus_service() -> Result<zbus::Connection, zbus::Error> {
     let service = RecGoControlService::default();
     let connection = zbus::connection::Builder::session()?
-        .name("io.github.antonio.RecGo")?
-        .serve_at("/io/github/antonio/RecGo", service)?
+        .name("io.github.Antux912012.RecGo")?
+        .serve_at("/io/github/Antux912012/RecGo", service)?
         .build()
         .await?;
     Ok(connection)

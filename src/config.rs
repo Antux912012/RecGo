@@ -1,6 +1,6 @@
 // Configuration constants and GSettings keys for RecGo.
 
-pub const APP_ID: &str = "io.github.antonio.RecGo";
+pub const APP_ID: &str = "io.github.Antux912012.RecGo";
 
 pub const KEY_VIDEO_CODEC: &str = "video-codec";
 pub const KEY_CONTAINER_FORMAT: &str = "container-format";

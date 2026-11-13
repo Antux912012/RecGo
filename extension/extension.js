@@ -12,7 +12,7 @@ import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 
 const RecGoIface = `
 <node>
-  <interface name="io.github.antonio.RecGo.Control">
+  <interface name="io.github.Antux912012.RecGo.Control">
     <method name="Start">
       <arg type="b" direction="out" />
     </method>
@@ -75,8 +75,8 @@ class RecGoIndicator extends PanelMenu.Button {
     _initProxy() {
         this._proxy = new RecGoProxy(
             Gio.DBus.session,
-            'io.github.antonio.RecGo',
-            '/io/github/antonio/RecGo',
+            'io.github.Antux912012.RecGo',
+            '/io/github/Antux912012/RecGo',
             (proxy, error) => {
                 if (error) {
                     console.error('Failed to connect to RecGo D-Bus service:', error);

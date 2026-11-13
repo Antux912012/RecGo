@@ -1,7 +1,7 @@
 # RecGo
 
 <p align="center">
-  <img src="data/icons/io.github.antonio.RecGo_256x256.png" alt="RecGo Application Icon" width="128" height="128">
+  <img src="data/icons/io.github.Antux912012.RecGo_256x256.png" alt="RecGo Application Icon" width="128" height="128">
 </p>
 
 <p align="center">
@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Antux912012/RecGo/releases"><img src="https://img.shields.io/badge/version-0.1.4-blue.svg" alt="Version 0.1.4"></a>
+  <a href="https://github.com/Antux912012/RecGo/releases"><img src="https://img.shields.io/badge/version-0.1.5-blue.svg" alt="Version 0.1.5"></a>
   <a href="https://www.gnu.org/licenses/gpl-3.0"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg" alt="GPL-3.0 License"></a>
   <a href="https://www.gtk.org/"><img src="https://img.shields.io/badge/GTK-4.14-orange.svg" alt="GTK4"></a>
   <a href="https://gnome.pages.gitlab.gnome.org/libadwaita/"><img src="https://img.shields.io/badge/Libadwaita-1.5-purple.svg" alt="Libadwaita"></a>
@@ -89,7 +89,7 @@ RecGo is packaged as a standalone Flatpak bundle:
 flatpak install --user --reinstall RecGo.flatpak
 
 # Run RecGo
-flatpak run io.github.antonio.RecGo
+flatpak run io.github.Antux912012.RecGo
 ```
 
 ---
@@ -123,9 +123,9 @@ cd RecGo
 RecGo/
 ├── data/
 │   ├── icons/                          # Multi-resolution icons and SVG
-│   ├── io.github.antonio.RecGo.desktop.in # Desktop entry file
-│   ├── io.github.antonio.RecGo.gschema.xml # GSettings schema
-│   └── io.github.antonio.RecGo.metainfo.xml # AppStream metadata
+│   ├── io.github.Antux912012.RecGo.desktop.in # Desktop entry file
+│   ├── io.github.Antux912012.RecGo.gschema.xml # GSettings schema
+│   └── io.github.Antux912012.RecGo.metainfo.xml # AppStream metadata
 ├── src/
 │   ├── pipeline/
 │   │   ├── codecs.rs                   # Hardware encoder detection (VA-API/Vulkan/NVENC)

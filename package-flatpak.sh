@@ -46,29 +46,29 @@ else
     install -Dm755 "${PROJECT_DIR}/target/debug/recgo" "${BUILD_DIR}/files/bin/recgo"
 fi
 
-install -Dm644 "${PROJECT_DIR}/data/io.github.antonio.RecGo.desktop.in" \
-    "${BUILD_DIR}/files/share/applications/io.github.antonio.RecGo.desktop"
-install -Dm644 "${PROJECT_DIR}/data/io.github.antonio.RecGo.desktop.in" \
-    "${BUILD_DIR}/export/share/applications/io.github.antonio.RecGo.desktop"
+install -Dm644 "${PROJECT_DIR}/data/io.github.Antux912012.RecGo.desktop.in" \
+    "${BUILD_DIR}/files/share/applications/io.github.Antux912012.RecGo.desktop"
+install -Dm644 "${PROJECT_DIR}/data/io.github.Antux912012.RecGo.desktop.in" \
+    "${BUILD_DIR}/export/share/applications/io.github.Antux912012.RecGo.desktop"
 
 # Install new PNG icons at all standard resolutions
 for size in 512 256 128 64 48 32; do
-    install -Dm644 "${PROJECT_DIR}/data/icons/io.github.antonio.RecGo_${size}x${size}.png" \
-        "${BUILD_DIR}/files/share/icons/hicolor/${size}x${size}/apps/io.github.antonio.RecGo.png"
-    install -Dm644 "${PROJECT_DIR}/data/icons/io.github.antonio.RecGo_${size}x${size}.png" \
-        "${BUILD_DIR}/export/share/icons/hicolor/${size}x${size}/apps/io.github.antonio.RecGo.png"
+    install -Dm644 "${PROJECT_DIR}/data/icons/io.github.Antux912012.RecGo_${size}x${size}.png" \
+        "${BUILD_DIR}/files/share/icons/hicolor/${size}x${size}/apps/io.github.Antux912012.RecGo.png"
+    install -Dm644 "${PROJECT_DIR}/data/icons/io.github.Antux912012.RecGo_${size}x${size}.png" \
+        "${BUILD_DIR}/export/share/icons/hicolor/${size}x${size}/apps/io.github.Antux912012.RecGo.png"
 done
 
-install -Dm644 "${PROJECT_DIR}/data/icons/io.github.antonio.RecGo.svg" \
-    "${BUILD_DIR}/files/share/icons/hicolor/scalable/apps/io.github.antonio.RecGo.svg"
-install -Dm644 "${PROJECT_DIR}/data/icons/io.github.antonio.RecGo.svg" \
-    "${BUILD_DIR}/export/share/icons/hicolor/scalable/apps/io.github.antonio.RecGo.svg"
-install -Dm644 "${PROJECT_DIR}/data/io.github.antonio.RecGo.gschema.xml" \
-    "${BUILD_DIR}/files/share/glib-2.0/schemas/io.github.antonio.RecGo.gschema.xml"
-install -Dm644 "${PROJECT_DIR}/data/io.github.antonio.RecGo.metainfo.xml" \
-    "${BUILD_DIR}/files/share/metainfo/io.github.antonio.RecGo.metainfo.xml"
-install -Dm644 "${PROJECT_DIR}/data/io.github.antonio.RecGo.metainfo.xml" \
-    "${BUILD_DIR}/export/share/metainfo/io.github.antonio.RecGo.metainfo.xml"
+install -Dm644 "${PROJECT_DIR}/data/icons/io.github.Antux912012.RecGo.svg" \
+    "${BUILD_DIR}/files/share/icons/hicolor/scalable/apps/io.github.Antux912012.RecGo.svg"
+install -Dm644 "${PROJECT_DIR}/data/icons/io.github.Antux912012.RecGo.svg" \
+    "${BUILD_DIR}/export/share/icons/hicolor/scalable/apps/io.github.Antux912012.RecGo.svg"
+install -Dm644 "${PROJECT_DIR}/data/io.github.Antux912012.RecGo.gschema.xml" \
+    "${BUILD_DIR}/files/share/glib-2.0/schemas/io.github.Antux912012.RecGo.gschema.xml"
+install -Dm644 "${PROJECT_DIR}/data/io.github.Antux912012.RecGo.metainfo.xml" \
+    "${BUILD_DIR}/files/share/metainfo/io.github.Antux912012.RecGo.metainfo.xml"
+install -Dm644 "${PROJECT_DIR}/data/io.github.Antux912012.RecGo.metainfo.xml" \
+    "${BUILD_DIR}/export/share/metainfo/io.github.Antux912012.RecGo.metainfo.xml"
 
 if command -v glib-compile-schemas >/dev/null 2>&1; then
     glib-compile-schemas "${BUILD_DIR}/files/share/glib-2.0/schemas"
@@ -80,9 +80,12 @@ podman run --rm \
     -v "${PROJECT_DIR}:/workspace:Z" \
     -w /workspace \
     localhost/dev-fedora:latest \
-    glib-compile-schemas /workspace/flatpak-staging/files/share/glib-2.0/schemas
+    bash -c "glib-compile-schemas /workspace/flatpak-staging/files/share/glib-2.0/schemas && \
+        mkdir -p /workspace/flatpak-staging/files/share/app-info/xmls /workspace/flatpak-staging/files/share/app-info/icons/flatpak /workspace/flatpak-staging/export/share/app-info/xmls /workspace/flatpak-staging/export/share/app-info/icons/flatpak && \
+        appstream-compose --prefix=/workspace/flatpak-staging/files --output-dir=/workspace/flatpak-staging/files/share/app-info/xmls --icons-dir=/workspace/flatpak-staging/files/share/app-info/icons/flatpak --origin=flatpak --basename=io.github.Antux912012.RecGo io.github.Antux912012.RecGo && \
+        cp -r /workspace/flatpak-staging/files/share/app-info/* /workspace/flatpak-staging/export/share/app-info/"
 
 flatpak build-export "${REPO_DIR}" "${BUILD_DIR}" stable
-flatpak build-bundle "${REPO_DIR}" "${BUNDLE_FILE}" io.github.antonio.RecGo stable
+flatpak build-bundle "${REPO_DIR}" "${BUNDLE_FILE}" io.github.Antux912012.RecGo stable
 
 echo "==> Flatpak bundle created at: ${BUNDLE_FILE}"
