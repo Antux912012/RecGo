@@ -95,9 +95,49 @@ mod imp {
                     if let Some(ref tex) = *self.screen_texture.borrow() {
                         snapshot.append_texture(tex, &screen_rect);
                     } else {
-                        snapshot.append_color(&gdk::RGBA::new(0.14, 0.18, 0.25, 1.0), &screen_rect);
+                        snapshot.append_color(&gdk::RGBA::new(0.11, 0.14, 0.19, 1.0), &screen_rect);
                         let top_bar = graphene::Rect::new(pad, pad, stage_w, 26.0);
-                        snapshot.append_color(&gdk::RGBA::new(0.07, 0.08, 0.10, 0.9), &top_bar);
+                        snapshot.append_color(&gdk::RGBA::new(0.07, 0.08, 0.11, 0.92), &top_bar);
+
+                        // Calm centered empty-state guidance for newcomers and scientists
+                        if self.countdown.get().is_none() {
+                            let pango_ctx = widget.pango_context();
+                            let title_layout = gtk::pango::Layout::new(&pango_ctx);
+                            title_layout.set_text("Ready to Capture");
+                            let mut title_font = gtk::pango::FontDescription::new();
+                            title_font.set_family("sans-serif");
+                            title_font.set_weight(gtk::pango::Weight::Bold);
+                            title_font.set_size(16 * gtk::pango::SCALE);
+                            title_layout.set_font_description(Some(&title_font));
+
+                            let sub_layout = gtk::pango::Layout::new(&pango_ctx);
+                            sub_layout.set_text("Click Select Source to preview a monitor or window,\nor press Record to begin capturing.\nDrag webcam to move · Drag handle or scroll to resize");
+                            sub_layout.set_alignment(gtk::pango::Alignment::Center);
+                            let mut sub_font = gtk::pango::FontDescription::new();
+                            sub_font.set_family("sans-serif");
+                            sub_font.set_size(10 * gtk::pango::SCALE);
+                            sub_layout.set_font_description(Some(&sub_font));
+
+                            let (tw, th) = title_layout.pixel_size();
+                            let (sw, sh) = sub_layout.pixel_size();
+                            let cx = if layout == LayoutPreset::DesktopPiP {
+                                pad + stage_w * 0.35
+                            } else {
+                                pad + stage_w * 0.5
+                            };
+                            let cy = pad + stage_h * 0.46;
+
+                            snapshot.save();
+                            snapshot.translate(&graphene::Point::new(cx - (tw as f32) / 2.0, cy - (th as f32) - 4.0));
+                            snapshot.append_layout(&title_layout, &gdk::RGBA::new(0.92, 0.94, 0.97, 0.88));
+                            snapshot.restore();
+
+                            snapshot.save();
+                            snapshot.translate(&graphene::Point::new(cx - (sw as f32) / 2.0, cy + 6.0));
+                            snapshot.append_layout(&sub_layout, &gdk::RGBA::new(0.70, 0.75, 0.84, 0.72));
+                            snapshot.restore();
+                            let _ = sh;
+                        }
                     }
                     snapshot.pop();
 

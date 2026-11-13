@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Antux912012/RecGo/releases"><img src="https://img.shields.io/badge/version-0.1.2-blue.svg" alt="Version 0.1.2"></a>
+  <a href="https://github.com/Antux912012/RecGo/releases"><img src="https://img.shields.io/badge/version-0.1.4-blue.svg" alt="Version 0.1.4"></a>
   <a href="https://www.gnu.org/licenses/gpl-3.0"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg" alt="GPL-3.0 License"></a>
   <a href="https://www.gtk.org/"><img src="https://img.shields.io/badge/GTK-4.14-orange.svg" alt="GTK4"></a>
   <a href="https://gnome.pages.gitlab.gnome.org/libadwaita/"><img src="https://img.shields.io/badge/Libadwaita-1.5-purple.svg" alt="Libadwaita"></a>
@@ -21,6 +21,18 @@
 ## Overview
 
 **RecGo** is a native, HIG-compliant Wayland screen, application window, and webcam recorder tailored for GNOME. Built with Rust, GTK4, Libadwaita, GStreamer, and PipeWire, RecGo provides high framerate screen recording with near-zero CPU load using full GPU hardware acceleration (VA-API Intel/AMD, Vulkan Video, and OpenGL).
+
+---
+
+## Screenshots
+
+| Studio Main View | Countdown Overlay |
+| :---: | :---: |
+| ![RecGo Studio Main View](data/screenshots/01-studio-main.png) | ![RecGo Countdown Overlay](data/screenshots/02-studio-countdown.png) |
+
+| Preferences & Hardware Encoders |
+| :---: |
+| ![RecGo Preferences](data/screenshots/03-preferences-recording.png) |
 
 ---
 

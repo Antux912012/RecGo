@@ -120,7 +120,7 @@ impl PreferencesDialog {
         rec_page.add(&cd_group);
 
         let enc_choice_group = adw::PreferencesGroup::new();
-        enc_choice_group.set_title("Video Encoder & Container Format");
+        enc_choice_group.set_title("Video Encoder &amp; Container Format");
         enc_choice_group.set_description(Some(
             "Select the video format and hardware-accelerated encoder used for recordings.",
         ));

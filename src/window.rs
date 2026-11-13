@@ -105,6 +105,7 @@ const CAMERA_CSS: &str = r#"
 }
 
 .camera-osd-time {
+    color: #f6f8fa;
     font-family: monospace;
     font-weight: 700;
     font-size: 13px;
@@ -202,28 +203,30 @@ impl RecGoWindow {
             .first()
             .map(|c| c.display_name.as_str())
             .unwrap_or("H.264");
-        let status_label = gtk::Label::new(Some(&format!("Ready ({} | {})", gpu_summary, default_codec_desc)));
+        let status_label = gtk::Label::new(Some("Ready to record"));
         status_label.add_css_class("dim-label");
         status_label.set_ellipsize(gtk::pango::EllipsizeMode::End);
         status_label.set_max_width_chars(36);
 
-        // Top HeaderBar
+        // Top HeaderBar (calm 3-zone Libadwaita layout)
         let header = adw::HeaderBar::new();
+        let win_title = adw::WindowTitle::new("RecGo", &format!("{} · {}", gpu_summary, default_codec_desc));
+        header.set_title_widget(Some(&win_title));
 
         let source_dropdown = gtk::DropDown::from_strings(&[
             "Screen / Monitor",
             "Application Window",
         ]);
-        source_dropdown.set_tooltip_text(Some("Select Capture Target"));
+        source_dropdown.set_tooltip_text(Some("Capture Target"));
         header.pack_start(&source_dropdown);
 
         let layout_dropdown = gtk::DropDown::from_strings(&[
-            "Desktop + Webcam PiP",
-            "Side by Side (50/50)",
+            "Desktop + PiP",
+            "Side by Side",
             "Screen Only",
             "Camera Only",
         ]);
-        layout_dropdown.set_tooltip_text(Some("Select Recording Layout"));
+        layout_dropdown.set_tooltip_text(Some("Recording Layout"));
         header.pack_start(&layout_dropdown);
 
         let shape_dropdown = gtk::DropDown::from_strings(&[
@@ -231,8 +234,7 @@ impl RecGoWindow {
             "Square (Shadow)",
             "Rectangle (Shadow)",
         ]);
-        shape_dropdown.set_tooltip_text(Some("Select Webcam Enclosure Shape"));
-        header.pack_start(&shape_dropdown);
+        shape_dropdown.set_tooltip_text(Some("Webcam Enclosure Shape"));
 
         let countdown_dropdown = gtk::DropDown::from_strings(&[
             "Countdown: 3s",
@@ -242,8 +244,47 @@ impl RecGoWindow {
             "Custom...",
         ]);
         countdown_dropdown.set_tooltip_text(Some("Countdown timer before recording"));
-        header.pack_start(&countdown_dropdown);
         let cd_guard = Rc::new(Cell::new(false));
+
+        // Primary App Menu (Preferences & About) per GNOME HIG
+        let app_menu = gio::Menu::new();
+        app_menu.append(Some("Preferences & Encoders"), Some("win.preferences"));
+        app_menu.append(Some("About RecGo"), Some("win.about"));
+        let menu_btn = gtk::MenuButton::builder()
+            .icon_name("open-menu-symbolic")
+            .tooltip_text("Main Menu")
+            .menu_model(&app_menu)
+            .build();
+        header.pack_end(&menu_btn);
+
+        // Framing & Timer Popover (progressive disclosure for Shape & Countdown)
+        let framing_box = gtk::Box::new(gtk::Orientation::Vertical, 10);
+        framing_box.set_margin_top(12);
+        framing_box.set_margin_bottom(12);
+        framing_box.set_margin_start(12);
+        framing_box.set_margin_end(12);
+
+        let shape_lbl = gtk::Label::new(Some("Webcam Shape"));
+        shape_lbl.set_xalign(0.0);
+        shape_lbl.add_css_class("heading");
+        framing_box.append(&shape_lbl);
+        framing_box.append(&shape_dropdown);
+
+        let cd_lbl = gtk::Label::new(Some("Recording Delay"));
+        cd_lbl.set_xalign(0.0);
+        cd_lbl.add_css_class("heading");
+        cd_lbl.set_margin_top(4);
+        framing_box.append(&cd_lbl);
+        framing_box.append(&countdown_dropdown);
+
+        let framing_popover = gtk::Popover::new();
+        framing_popover.set_child(Some(&framing_box));
+        let framing_btn = gtk::MenuButton::builder()
+            .icon_name("preferences-other-symbolic")
+            .tooltip_text("Webcam Shape & Countdown Timer")
+            .popover(&framing_popover)
+            .build();
+        header.pack_end(&framing_btn);
 
         // Live Webcam Toggle Button in HeaderBar
         let cam_toggle = gtk::ToggleButton::new();
@@ -258,15 +299,16 @@ impl RecGoWindow {
         mic_toggle.set_tooltip_text(Some("Toggle Microphone Audio Recording"));
         header.pack_end(&mic_toggle);
 
-        // Preferences Button in HeaderBar
-        let pref_btn = gtk::Button::from_icon_name("emblem-system-symbolic");
-        pref_btn.set_tooltip_text(Some("Preferences (Video Codecs & Countdown)"));
+        // Register window actions for Preferences & About
+        let pref_action = gio::SimpleAction::new("preferences", None);
         let win_clone = window.clone();
         let toast_for_pref = toast_overlay.clone();
         let status_for_pref = status_label.clone();
+        let title_for_pref = win_title.clone();
+        let gpu_for_pref = gpu_summary.clone();
         let cd_dd_pref = countdown_dropdown.clone();
         let cd_guard_pref = cd_guard.clone();
-        pref_btn.connect_clicked(move |_| {
+        pref_action.connect_activate(move |_, _| {
             let current_idx = win_clone.imp().selected_codec_index.get();
             let cd_sec = win_clone.imp().countdown_seconds.get();
             let custom_cd = win_clone.imp().custom_countdown_seconds.get();
@@ -274,6 +316,8 @@ impl RecGoWindow {
             let win_for_cd_pref = win_clone.clone();
             let toast_inner = toast_for_pref.clone();
             let status_inner = status_for_pref.clone();
+            let title_inner = title_for_pref.clone();
+            let gpu_inner = gpu_for_pref.clone();
             let cd_dd_inner = cd_dd_pref.clone();
             let cd_guard_inner = cd_guard_pref.clone();
             let dialog = PreferencesDialog::new(
@@ -286,6 +330,7 @@ impl RecGoWindow {
                     if let Some(c) = codecs.get(new_idx) {
                         toast_inner.add_toast(adw::Toast::new(&format!("Active encoder: {}", c.display_name)));
                         status_inner.set_text(&format!("Encoder: {}", c.display_name));
+                        title_inner.set_subtitle(&format!("{} · {}", gpu_inner, c.display_name));
                     }
                 },
                 move |secs, custom_secs| {
@@ -305,27 +350,25 @@ impl RecGoWindow {
             );
             dialog.present(Some(&win_clone));
         });
-        header.pack_end(&pref_btn);
+        window.add_action(&pref_action);
 
-        // About Button in HeaderBar
-        let about_btn = gtk::Button::from_icon_name("help-about-symbolic");
-        about_btn.set_tooltip_text(Some("About RecGo"));
+        let about_action = gio::SimpleAction::new("about", None);
         let win_for_about = window.clone();
-        about_btn.connect_clicked(move |_| {
+        about_action.connect_activate(move |_, _| {
             let about = adw::AboutDialog::builder()
                 .application_name("RecGo")
                 .application_icon("io.github.antonio.RecGo")
-                .developer_name("Antonio")
+                .developer_name("Antonio De Gaetano")
                 .version(env!("CARGO_PKG_VERSION"))
                 .comments("High-performance GPU-accelerated desktop and webcam recorder for GNOME.")
                 .website("https://github.com/Antux912012/RecGo")
                 .issue_url("https://github.com/Antux912012/RecGo/issues")
                 .license_type(gtk::License::Gpl30)
-                .copyright("© 2026 Antonio")
+                .copyright("© 2026 Antonio De Gaetano")
                 .build();
             about.present(Some(&win_for_about));
         });
-        header.pack_end(&about_btn);
+        window.add_action(&about_action);
 
         toolbar_view.add_top_bar(&header);
 
@@ -349,15 +392,7 @@ impl RecGoWindow {
             }
         }
 
-        let banner_text = format!(
-            "GPU Acceleration Active: {} | Drag webcam to move; drag blue corner handle, scroll wheel, or use slider to resize.",
-            gpu_summary
-        );
-        let status_banner = adw::Banner::new(&banner_text);
-        status_banner.set_revealed(true);
-
         let content_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        content_box.append(&status_banner);
         content_box.append(&preview);
         toolbar_view.set_content(Some(&content_box));
 
@@ -571,8 +606,16 @@ impl RecGoWindow {
         osd_box.append(&osd_dot);
         osd_box.append(&osd_text);
 
-        // Desktop ScreenCast Preview Button with screen symbol
-        let btn_preview_screen = gtk::Button::from_icon_name("video-display-symbolic");
+        // Desktop ScreenCast Preview Button with screen symbol and clear label
+        let btn_preview_screen = gtk::Button::new();
+        let prev_box = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        let prev_icon = gtk::Image::from_icon_name("video-display-symbolic");
+        prev_icon.set_pixel_size(18);
+        let prev_label = gtk::Label::new(Some("Select Source"));
+        prev_label.set_css_classes(&["camera-btn-label"]);
+        prev_box.append(&prev_icon);
+        prev_box.append(&prev_label);
+        btn_preview_screen.set_child(Some(&prev_box));
         btn_preview_screen.set_css_classes(&["pill", "camera-preview-btn"]);
         btn_preview_screen.set_tooltip_text(Some("Select Desktop or Window to Preview (ScreenCast)"));
 
@@ -1137,6 +1180,55 @@ impl RecGoWindow {
 
         toast_overlay.set_child(Some(&toolbar_view));
         window.set_content(Some(&toast_overlay));
+
+        // Automated Wayland screenshot mode (RECGO_SCREENSHOT_DIR) for README & FlatPark
+        if let Ok(shot_dir) = std::env::var("RECGO_SCREENSHOT_DIR") {
+            let win_shot = window.downgrade();
+            let preview_shot = preview.clone();
+            glib::timeout_add_local_once(Duration::from_millis(800), move || {
+                let Some(w) = win_shot.upgrade() else { return };
+                let out_dir = PathBuf::from(&shot_dir);
+                let _ = std::fs::create_dir_all(&out_dir);
+
+                let save_widget_png = Rc::new(move |widget: &gtk::Widget, filename: &str| {
+                    let paintable = gtk::WidgetPaintable::new(Some(widget));
+                    let width = widget.width().max(1) as f32;
+                    let height = widget.height().max(1) as f32;
+                    let snapshot = gtk::Snapshot::new();
+                    paintable.snapshot(&snapshot, width as f64, height as f64);
+                    if let Some(node) = snapshot.to_node() {
+                        if let Some(native) = widget.native() {
+                            if let Some(renderer) = native.renderer() {
+                                let bounds = gtk::graphene::Rect::new(0.0, 0.0, width, height);
+                                let tex = renderer.render_texture(&node, Some(&bounds));
+                                let _ = tex.save_to_png(out_dir.join(filename));
+                            }
+                        }
+                    }
+                });
+
+                save_widget_png(w.upcast_ref(), "01-studio-main.png");
+                preview_shot.set_countdown(Some(3));
+                let save_2 = save_widget_png.clone();
+                let win_shot_2 = win_shot.clone();
+                glib::timeout_add_local_once(Duration::from_millis(250), move || {
+                    if let Some(w2) = win_shot_2.upgrade() {
+                        save_2(w2.upcast_ref(), "02-studio-countdown.png");
+                        preview_shot.set_countdown(None);
+                        let _ = WidgetExt::activate_action(&w2, "win.preferences", None);
+                        let save_3 = save_2.clone();
+                        let win_shot_3 = win_shot_2.clone();
+                        glib::timeout_add_local_once(Duration::from_millis(650), move || {
+                            if let Some(w3) = win_shot_3.upgrade() {
+                                save_3(w3.upcast_ref(), "03-preferences-recording.png");
+                                w3.close();
+                            }
+                        });
+                    }
+                });
+            });
+        }
+
         window
     }
 }
