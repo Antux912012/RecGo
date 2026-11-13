@@ -32,8 +32,30 @@ pub struct LiveFeedCapture {
     latest_frame: Arc<Mutex<Option<(Vec<u8>, i32, i32, i32)>>>,
 }
 
+/// Validates that a V4L2 device path matches `/dev/video<N>` to prevent GStreamer launch-string injection.
+fn validate_v4l2_device(device: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let suffix = device
+        .strip_prefix("/dev/video")
+        .ok_or("Invalid V4L2 device path: must start with /dev/video")?;
+    if suffix.is_empty() || !suffix.chars().all(|c| c.is_ascii_digit()) {
+        return Err("Invalid V4L2 device path: expected numeric device index".into());
+    }
+    Ok(())
+}
+
+/// Probes common V4L2 video device nodes and returns the first existing device path.
+pub fn detect_webcam_device() -> Option<String> {
+    for dev in &["/dev/video0", "/dev/video2", "/dev/video1"] {
+        if std::path::Path::new(dev).exists() {
+            return Some((*dev).to_string());
+        }
+    }
+    None
+}
+
 impl LiveFeedCapture {
     pub fn new_webcam(device: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        validate_v4l2_device(device)?;
         let desc = format!(
             "v4l2src device={} ! videoconvert ! video/x-raw,format=RGBA ! appsink name=sink max-buffers=1 drop=true sync=false",
             device
@@ -225,7 +247,15 @@ impl CompositorPipeline {
             _ => ("videoconvert", "", ""),
         };
 
-        let out_loc = output_path.to_string_lossy().replace('\"', "\\\"");
+        if let Some(ref dev) = webcam_device {
+            validate_v4l2_device(dev)?;
+        }
+
+        let out_str = output_path.to_string_lossy();
+        if out_str.chars().any(|c| c.is_control() || c == '"') {
+            return Err("Output path contains unsupported characters".into());
+        }
+        let out_loc = out_str.into_owned();
 
         // Select matching audio encoder for container (Opus for WebM/MKV, AAC or Opus for MP4)
         let audio_branch = if enable_microphone {
@@ -517,5 +547,23 @@ impl CompositorPipeline {
             let _ = pipe.set_state(gst::State::Null);
             on_complete();
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_v4l2_device;
+
+    #[test]
+    fn validates_expected_v4l2_paths() {
+        assert!(validate_v4l2_device("/dev/video0").is_ok());
+        assert!(validate_v4l2_device("/dev/video12").is_ok());
+    }
+
+    #[test]
+    fn rejects_invalid_or_injected_v4l2_paths() {
+        assert!(validate_v4l2_device("/dev/video").is_err());
+        assert!(validate_v4l2_device("/dev/video0 ! fakesink").is_err());
+        assert!(validate_v4l2_device("/tmp/video0").is_err());
     }
 }

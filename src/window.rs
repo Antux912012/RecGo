@@ -5,7 +5,6 @@ use adw::subclass::prelude::*;
 use ashpd::desktop::screencast::{CursorMode, SourceType};
 use gtk::{gdk, gio, glib};
 use std::cell::{Cell, RefCell};
-use std::os::fd::IntoRawFd;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
@@ -132,7 +131,9 @@ use crate::pipeline::codecs::{
     detect_gpu_acceleration, get_extension_for_container, get_supported_codecs, CodecInfo,
     ContainerFormat, VideoCodec,
 };
-use crate::pipeline::compositor::{CompositorPipeline, LayoutPreset, LiveFeedCapture, WebcamShape};
+use crate::pipeline::compositor::{
+    detect_webcam_device, CompositorPipeline, LayoutPreset, LiveFeedCapture, WebcamShape,
+};
 use crate::portal::screencast::{portal_runtime, start_screencast_session, CaptureStream};
 use crate::ui::preferences::PreferencesDialog;
 use crate::ui::preview::RecGoPreview;
@@ -203,6 +204,8 @@ impl RecGoWindow {
             .unwrap_or("H.264");
         let status_label = gtk::Label::new(Some(&format!("Ready ({} | {})", gpu_summary, default_codec_desc)));
         status_label.add_css_class("dim-label");
+        status_label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        status_label.set_max_width_chars(36);
 
         // Top HeaderBar
         let header = adw::HeaderBar::new();
@@ -240,6 +243,7 @@ impl RecGoWindow {
         ]);
         countdown_dropdown.set_tooltip_text(Some("Countdown timer before recording"));
         header.pack_start(&countdown_dropdown);
+        let cd_guard = Rc::new(Cell::new(false));
 
         // Live Webcam Toggle Button in HeaderBar
         let cam_toggle = gtk::ToggleButton::new();
@@ -261,6 +265,7 @@ impl RecGoWindow {
         let toast_for_pref = toast_overlay.clone();
         let status_for_pref = status_label.clone();
         let cd_dd_pref = countdown_dropdown.clone();
+        let cd_guard_pref = cd_guard.clone();
         pref_btn.connect_clicked(move |_| {
             let current_idx = win_clone.imp().selected_codec_index.get();
             let cd_sec = win_clone.imp().countdown_seconds.get();
@@ -270,6 +275,7 @@ impl RecGoWindow {
             let toast_inner = toast_for_pref.clone();
             let status_inner = status_for_pref.clone();
             let cd_dd_inner = cd_dd_pref.clone();
+            let cd_guard_inner = cd_guard_pref.clone();
             let dialog = PreferencesDialog::new(
                 current_idx,
                 cd_sec,
@@ -292,7 +298,9 @@ impl RecGoWindow {
                         0 => 3,
                         _ => 4,
                     };
+                    cd_guard_inner.set(true);
                     cd_dd_inner.set_selected(dd_idx);
+                    cd_guard_inner.set(false);
                 },
             );
             dialog.present(Some(&win_clone));
@@ -308,7 +316,7 @@ impl RecGoWindow {
                 .application_name("RecGo")
                 .application_icon("io.github.antonio.RecGo")
                 .developer_name("Antonio")
-                .version("0.1.2")
+                .version(env!("CARGO_PKG_VERSION"))
                 .comments("High-performance GPU-accelerated desktop and webcam recorder for GNOME.")
                 .website("https://github.com/Antux912012/RecGo")
                 .issue_url("https://github.com/Antux912012/RecGo/issues")
@@ -354,19 +362,22 @@ impl RecGoWindow {
         toolbar_view.set_content(Some(&content_box));
 
         // 30 FPS UI refresh timer pulling frames from live webcam & desktop feeds
-        let win_timer = window.clone();
+        let win_timer = window.downgrade();
         let preview_timer = preview.clone();
         glib::timeout_add_local(Duration::from_millis(33), move || {
-            if let Some(ref cam) = *win_timer.imp().webcam_feed.borrow() {
+            let Some(win_ref) = win_timer.upgrade() else {
+                return glib::ControlFlow::Break;
+            };
+            if let Some(ref cam) = *win_ref.imp().webcam_feed.borrow() {
                 if let Some(tex) = cam.latest_texture() {
                     preview_timer.set_webcam_texture(Some(tex));
                 }
             }
-            if let Some(ref rec_pipe) = *win_timer.imp().pipeline.borrow() {
+            if let Some(ref rec_pipe) = *win_ref.imp().pipeline.borrow() {
                 if let Some(tex) = rec_pipe.latest_screen_texture() {
                     preview_timer.set_screen_texture(Some(tex));
                 }
-            } else if let Some(ref scr_feed) = *win_timer.imp().screen_preview_feed.borrow() {
+            } else if let Some(ref scr_feed) = *win_ref.imp().screen_preview_feed.borrow() {
                 if let Some(tex) = scr_feed.latest_texture() {
                     preview_timer.set_screen_texture(Some(tex));
                 }
@@ -398,7 +409,11 @@ impl RecGoWindow {
 
         let win_for_cd = window.clone();
         let toast_for_cd = toast_overlay.clone();
+        let cd_guard_cb = cd_guard.clone();
         countdown_dropdown.connect_selected_notify(move |dd| {
+            if cd_guard_cb.get() {
+                return;
+            }
             let sel = dd.selected();
             match sel {
                 0 => {
@@ -493,7 +508,7 @@ impl RecGoWindow {
 
         // Initialize Camera Styles CSS Provider
         let css_provider = gtk::CssProvider::new();
-        css_provider.load_from_data(CAMERA_CSS);
+        css_provider.load_from_string(CAMERA_CSS);
         if let Some(display) = gdk::Display::default() {
             gtk::style_context_add_provider_for_display(
                 &display,
@@ -596,13 +611,16 @@ impl RecGoWindow {
 
         // Elapsed recording timer state & OSD ticker
         let elapsed_seconds = Rc::new(Cell::new(0u64));
-        let win_osd = window.clone();
+        let win_osd = window.downgrade();
         let elapsed_osd = elapsed_seconds.clone();
         let osd_text_osd = osd_text.clone();
         let osd_dot_osd = osd_dot.clone();
         glib::timeout_add_local(Duration::from_secs(1), move || {
-            if win_osd.imp().is_recording.get() {
-                if !win_osd.imp().is_paused.get() {
+            let Some(win_ref) = win_osd.upgrade() else {
+                return glib::ControlFlow::Break;
+            };
+            if win_ref.imp().is_recording.get() {
+                if !win_ref.imp().is_paused.get() {
                     let s = elapsed_osd.get() + 1;
                     elapsed_osd.set(s);
                     let hrs = s / 3600;
@@ -660,19 +678,17 @@ impl RecGoWindow {
                     if let Some(old_preview) = win_inner.imp().screen_preview_feed.borrow_mut().take() {
                         old_preview.stop_async();
                     }
-                    if let Ok(cloned_fd) = stream.try_clone_fd() {
-                        match LiveFeedCapture::new_screen(cloned_fd.into_raw_fd(), stream.node_id) {
-                            Ok(feed) => {
-                                win_inner.imp().screen_preview_feed.replace(Some(feed));
-                                status_l.set_text(&format!(
-                                    "Live desktop preview active ({}x{})",
-                                    stream.width, stream.height
-                                ));
-                                toast_inner.add_toast(adw::Toast::new("Live desktop preview active"));
-                            }
-                            Err(e) => {
-                                status_l.set_text(&format!("Preview error: {}", e));
-                            }
+                    match LiveFeedCapture::new_screen(stream.raw_fd(), stream.node_id) {
+                        Ok(feed) => {
+                            win_inner.imp().screen_preview_feed.replace(Some(feed));
+                            status_l.set_text(&format!(
+                                "Live desktop preview active ({}x{})",
+                                stream.width, stream.height
+                            ));
+                            toast_inner.add_toast(adw::Toast::new("Live desktop preview active"));
+                        }
+                        Err(e) => {
+                            status_l.set_text(&format!("Preview error: {}", e));
                         }
                     }
                     stream_store.replace(Some(stream));
@@ -764,10 +780,16 @@ impl RecGoWindow {
                             cam.stop_async();
                         }
 
+                        let Some(webcam_dev) = detect_webcam_device() else {
+                            status_l.set_text("No webcam device found");
+                            toast_inner.add_toast(adw::Toast::new("No webcam device found"));
+                            return;
+                        };
+
                         match CompositorPipeline::new(
                             None,
                             None,
-                            Some("/dev/video0".to_string()),
+                            Some(webcam_dev),
                             (0.0, 0.0),
                             1.0,
                             mic_on,
@@ -807,11 +829,10 @@ impl RecGoWindow {
                     }
 
                     // For ScreenOnly, DesktopPiP, SideBySide
-                    let existing_stream = if let Some(ref s) = *stream_store.borrow() {
-                        s.try_clone_fd().ok().map(|fd| (fd.into_raw_fd(), s.node_id, s.width, s.height))
-                    } else {
-                        None
-                    };
+                    let existing_stream = stream_store
+                        .borrow()
+                        .as_ref()
+                        .map(|s| (s.raw_fd(), s.node_id, s.width, s.height));
 
                     let (screen_fd, screen_node, screen_w, screen_h) = match existing_stream {
                         Some(info) => info,
@@ -828,17 +849,12 @@ impl RecGoWindow {
 
                             match rx.await {
                                 Ok(Ok(stream)) => {
-                                    let cloned = stream.try_clone_fd().ok().map(|fd| fd.into_raw_fd());
+                                    let fd = stream.raw_fd();
                                     let node = stream.node_id;
                                     let w = stream.width;
                                     let h = stream.height;
                                     stream_store.replace(Some(stream));
-                                    if let Some(cfd) = cloned {
-                                        (cfd, node, w, h)
-                                    } else {
-                                        status_l.set_text("Failed to duplicate screen stream handle");
-                                        return;
-                                    }
+                                    (fd, node, w, h)
                                 }
                                 Ok(Err(err)) => {
                                     status_l.set_text("Screen selection cancelled or failed");
@@ -866,7 +882,7 @@ impl RecGoWindow {
                     }
 
                     let webcam_dev = if layout == LayoutPreset::DesktopPiP || layout == LayoutPreset::SideBySide {
-                        Some("/dev/video0".to_string())
+                        detect_webcam_device()
                     } else {
                         None
                     };
@@ -1091,16 +1107,32 @@ impl RecGoWindow {
 
                 // Restore desktop preview feed if screencast stream exists
                 if let Some(ref stream) = *stream_store_done.borrow() {
-                    if let Ok(cloned_fd) = stream.try_clone_fd() {
-                        if let Ok(feed) = LiveFeedCapture::new_screen(cloned_fd.into_raw_fd(), stream.node_id) {
-                            win_done.imp().screen_preview_feed.replace(Some(feed));
-                        }
+                    if let Ok(feed) = LiveFeedCapture::new_screen(stream.raw_fd(), stream.node_id) {
+                        win_done.imp().screen_preview_feed.replace(Some(feed));
                     }
                 }
 
                 status_done.set_text("Recording saved to Videos folder");
                 toast_done.add_toast(adw::Toast::new("Video successfully saved to Videos folder"));
             });
+        });
+
+        // Clean up active countdowns, preview feeds, and recording pipeline on window close
+        window.connect_close_request(|win| {
+            if let Some(src) = win.imp().countdown_source_id.borrow_mut().take() {
+                src.remove();
+            }
+            win.imp().is_counting_down.set(false);
+            if let Some(cam) = win.imp().webcam_feed.borrow_mut().take() {
+                cam.stop_async();
+            }
+            if let Some(scr) = win.imp().screen_preview_feed.borrow_mut().take() {
+                scr.stop_async();
+            }
+            if let Some(pipe) = win.imp().pipeline.borrow_mut().take() {
+                pipe.stop_async(|| {});
+            }
+            glib::Propagation::Proceed
         });
 
         toast_overlay.set_child(Some(&toolbar_view));

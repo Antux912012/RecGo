@@ -120,7 +120,7 @@ impl PreferencesDialog {
         rec_page.add(&cd_group);
 
         let enc_choice_group = adw::PreferencesGroup::new();
-        enc_choice_group.set_title("Video Encoder &amp; Container Format");
+        enc_choice_group.set_title("Video Encoder & Container Format");
         enc_choice_group.set_description(Some(
             "Select the video format and hardware-accelerated encoder used for recordings.",
         ));
@@ -194,11 +194,11 @@ impl PreferencesDialog {
 
         for info in get_supported_codecs() {
             let row = adw::ActionRow::new();
-            row.set_title(&info.display_name);
-            row.set_subtitle(&format!(
+            row.set_title(&glib::markup_escape_text(&info.display_name));
+            row.set_subtitle(&glib::markup_escape_text(&format!(
                 "GStreamer element: {} — {}",
                 info.element_name, info.backend_label
-            ));
+            )));
             let badge = gtk::Label::new(Some(if info.is_hardware_accelerated {
                 "GPU Hardware"
             } else {

@@ -84,7 +84,7 @@ pub fn detect_encoder(codec: &VideoCodec) -> (String, bool, &'static str) {
                 ("vah264enc".to_string(), true, "VA-API GPU (Intel/AMD)")
             } else if has_element("vah264lpenc") {
                 ("vah264lpenc".to_string(), true, "VA-API Low-Power GPU (Intel/AMD)")
-            } else if has_element(" vulkanh264enc") || has_element("vulkanh264enc") {
+            } else if has_element("vulkanh264enc") {
                 ("vulkanh264enc".to_string(), true, "Vulkan Video GPU")
             } else if has_element("vaapih264enc") {
                 ("vaapih264enc".to_string(), true, "VA-API Legacy GPU")

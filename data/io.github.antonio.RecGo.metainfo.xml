@@ -16,6 +16,16 @@
   <url type="bugtracker">https://github.com/Antux912012/RecGo/issues</url>
   <url type="vcs-browser">https://github.com/Antux912012/RecGo</url>
   <releases>
+    <release version="0.1.3" date="2026-11-13">
+      <description>
+        <p>Release v0.1.3 fixes webcam device detection, PipeWire file descriptor leaks, window lifecycle cleanup, and Preferences UI rendering:</p>
+        <ul>
+          <li>Security and Validation: Validates V4L2 device paths and output paths before building GStreamer pipelines.</li>
+          <li>Lifecycle and Leak Fixes: Cleans up timers, preview feeds, and active recording pipelines on window close, and eliminates cloned PipeWire file descriptor leaks.</li>
+          <li>UI/UX Fixes: Fixes Pango markup escaping in Preferences, prevents duplicate custom countdown dialogs, and ellipsizes long status paths in the bottom bar.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.2" date="2026-11-04">
       <description>
         <p>Added countdown timer option before recording (3s, 5s, 10s, or custom up to 5 minutes) and preserved webcam frame and live view framing in recorded videos.</p>

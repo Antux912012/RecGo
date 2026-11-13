@@ -3,7 +3,7 @@
 
 set -euo pipefail
 
-PROJECT_DIR="/home/antonio/Projects/RecGo"
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${PROJECT_DIR}"
 
 echo "==> Step 1: Compiling RecGo inside Mithrandir Podman container..."

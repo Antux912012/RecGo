@@ -5,7 +5,7 @@
 set -euo pipefail
 
 CONTAINER_IMAGE="${RECGO_CONTAINER:-localhost/dev-fedora:latest}"
-PROJECT_DIR="/home/antonio/Projects/RecGo"
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CARGO_ARGS=("${@:-check}")
 
 if [[ "$CONTAINER_IMAGE" == *"fedora"* ]]; then
