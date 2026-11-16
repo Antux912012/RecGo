@@ -1,0 +1,23 @@
+app-id: io.github.Antux912012.RecGo
+runtime: org.gnome.Platform
+runtime-version: '51'
+sdk: org.gnome.Sdk
+command: recgo
+finish-args:
+  - --share=ipc
+  - --share=network
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --socket=pulseaudio
+  - --device=all
+  - --filesystem=xdg-videos
+  - --filesystem=xdg-run/pipewire-0
+  - --talk-name=org.freedesktop.portal.Desktop
+  - --own-name=io.github.Antux912012.RecGo
+  - --talk-name=org.kde.StatusNotifierWatcher
+modules:
+  - name: recgo
+    buildsystem: meson
+    sources:
+      - type: dir
+        path: .
