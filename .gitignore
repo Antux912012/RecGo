@@ -1,4 +1,13 @@
-/target
-/flatpak-staging
-/flatpak-repo
-RecGo.flatpak
+/build/
+/build-flatpak/
+/build-deb/
+/build-rpm/
+/flatpak-staging/
+/flatpak-repo/
+/deb-staging/
+/rpm-staging/
+/.cache/
+*.flatpak
+*.deb
+*.rpm
+.DS_Store

@@ -1,27 +1,99 @@
 project(
   'recgo',
-  'rust',
-  version: '0.1.6',
+  'c', 'vala',
+  version: '0.2.0',
   license: 'GPL-3.0-or-later',
-  meson_version: '>= 0.59.0'
+  meson_version: '>= 0.62.0',
+  default_options: [
+    'c_std=gnu11',
+    'warning_level=2',
+    'optimization=2',
+  ],
 )
 
-dependency('gtk4', version: '>= 4.14')
-dependency('libadwaita-1', version: '>= 1.5')
-dependency('gstreamer-1.0', version: '>= 1.20')
-dependency('gstreamer-video-1.0', version: '>= 1.20')
-dependency('gstreamer-gl-1.0', version: '>= 1.20')
+gnome = import('gnome')
+cc = meson.get_compiler('c')
+valac = meson.get_compiler('vala')
 
-cargo = find_program('cargo', required: true)
+gtk4_dep = dependency('gtk4', version: '>= 4.14')
+adw_dep = dependency('libadwaita-1', version: '>= 1.5')
+gio_dep = dependency('gio-2.0')
+gio_unix_dep = dependency('gio-unix-2.0')
+gst_dep = dependency('gstreamer-1.0', version: '>= 1.20')
+gst_app_dep = dependency('gstreamer-app-1.0', version: '>= 1.20')
+gst_video_dep = dependency('gstreamer-video-1.0', version: '>= 1.20')
 
-custom_target(
-  'cargo-build',
-  build_by_default: true,
-  build_always_stale: true,
-  output: ['recgo'],
-  console: true,
-  command: [
-    cargo, 'build',
-    '--manifest-path', meson.project_source_root() / 'Cargo.toml'
-  ]
+m_dep = cc.find_library('m', required: false)
+posix_dep = valac.find_library('posix')
+recgo_gst_vapi = valac.find_library('recgo-gst', dirs: meson.current_source_dir() / 'src' / 'gst')
+
+subdir('data')
+
+conf_data = configuration_data()
+conf_data.set('VERSION', meson.project_version())
+config_vala = configure_file(
+  input: 'src/config.vala.in',
+  output: 'config.vala',
+  configuration: conf_data,
+)
+
+c_sources = files(
+  'src/gst/recgo-codecs.c',
+  'src/gst/recgo-devices.c',
+  'src/gst/recgo-preview.c',
+  'src/gst/recgo-recorder.c',
+)
+
+vala_sources = files(
+  'src/main.vala',
+  'src/application.vala',
+  'src/window.vala',
+  'src/preview-widget.vala',
+  'src/preferences-dialog.vala',
+  'src/portal.vala',
+)
+
+executable(
+  'recgo',
+  [c_sources, vala_sources, config_vala, recgo_resources],
+  include_directories: include_directories('src/gst'),
+  dependencies: [
+    gtk4_dep,
+    adw_dep,
+    gio_dep,
+    gio_unix_dep,
+    gst_dep,
+    gst_app_dep,
+    gst_video_dep,
+    m_dep,
+    posix_dep,
+    recgo_gst_vapi,
+  ],
+  vala_args: [
+    '--target-glib=2.76',
+    '--vapidir=' + (meson.current_source_dir() / 'src' / 'gst'),
+  ],
+  c_args: [
+    '-Wno-unused-parameter',
+    '-Wno-incompatible-pointer-types',
+  ],
+  install: true,
+)
+
+test_gst = executable(
+  'test-gst',
+  files(
+    'tests/test-gst.c',
+    'src/gst/recgo-codecs.c',
+    'src/gst/recgo-devices.c',
+  ),
+  include_directories: include_directories('src/gst'),
+  dependencies: [gio_dep, gst_dep],
+)
+test('gst-core', test_gst)
+
+gnome.post_install(
+  glib_compile_schemas: true,
+  gtk_update_icon_cache: true,
+  update_desktop_database: true,
 )

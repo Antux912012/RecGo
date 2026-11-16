@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Build RecGo inside the Mithrandir Podman container and package it as a Flatpak bundle (.flatpak).
+# Build RecGo (Vala + C + Meson) inside the recgo-builder Podman container and package as a Flatpak bundle.
 
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${PROJECT_DIR}"
 
-echo "==> Step 1: Compiling RecGo inside Mithrandir Podman container..."
+echo "==> Step 1: Compiling RecGo inside recgo-builder Podman container..."
+./build-in-podman.sh setup -Dprefix=/app
 ./build-in-podman.sh build
 
 echo "==> Step 2: Staging Flatpak build directory..."
@@ -15,75 +16,21 @@ REPO_DIR="${PROJECT_DIR}/flatpak-repo"
 BUNDLE_FILE="${PROJECT_DIR}/RecGo.flatpak"
 
 rm -rf "${BUILD_DIR}" "${REPO_DIR}" "${BUNDLE_FILE}"
-mkdir -p "${BUILD_DIR}/files/bin" \
-         "${BUILD_DIR}/files/share/applications" \
-         "${BUILD_DIR}/files/share/icons/hicolor/scalable/apps" \
-         "${BUILD_DIR}/files/share/icons/hicolor/512x512/apps" \
-         "${BUILD_DIR}/files/share/icons/hicolor/256x256/apps" \
-         "${BUILD_DIR}/files/share/icons/hicolor/128x128/apps" \
-         "${BUILD_DIR}/files/share/icons/hicolor/64x64/apps" \
-         "${BUILD_DIR}/files/share/icons/hicolor/48x48/apps" \
-         "${BUILD_DIR}/files/share/icons/hicolor/32x32/apps" \
-         "${BUILD_DIR}/files/share/glib-2.0/schemas" \
-         "${BUILD_DIR}/files/share/metainfo" \
-         "${BUILD_DIR}/export/share/applications" \
-         "${BUILD_DIR}/export/share/metainfo" \
-         "${BUILD_DIR}/export/share/icons/hicolor/scalable/apps" \
-         "${BUILD_DIR}/export/share/icons/hicolor/512x512/apps" \
-         "${BUILD_DIR}/export/share/icons/hicolor/256x256/apps" \
-         "${BUILD_DIR}/export/share/icons/hicolor/128x128/apps" \
-         "${BUILD_DIR}/export/share/icons/hicolor/64x64/apps" \
-         "${BUILD_DIR}/export/share/icons/hicolor/48x48/apps" \
-         "${BUILD_DIR}/export/share/icons/hicolor/32x32/apps"
+mkdir -p "${BUILD_DIR}/files" "${BUILD_DIR}/export"
 
 cp -f "${PROJECT_DIR}/flatpak-metadata.ini" "${BUILD_DIR}/metadata"
 
-if [[ -f "${PROJECT_DIR}/target/release/recgo" ]]; then
-    echo "==> Using optimized release binary..."
-    install -Dm755 "${PROJECT_DIR}/target/release/recgo" "${BUILD_DIR}/files/bin/recgo"
-else
-    echo "==> Using debug binary..."
-    install -Dm755 "${PROJECT_DIR}/target/debug/recgo" "${BUILD_DIR}/files/bin/recgo"
-fi
-
-install -Dm644 "${PROJECT_DIR}/data/io.github.Antux912012.RecGo.desktop.in" \
-    "${BUILD_DIR}/files/share/applications/io.github.Antux912012.RecGo.desktop"
-install -Dm644 "${PROJECT_DIR}/data/io.github.Antux912012.RecGo.desktop.in" \
-    "${BUILD_DIR}/export/share/applications/io.github.Antux912012.RecGo.desktop"
-
-# Install new PNG icons at all standard resolutions
-for size in 512 256 128 64 48 32; do
-    install -Dm644 "${PROJECT_DIR}/data/icons/io.github.Antux912012.RecGo_${size}x${size}.png" \
-        "${BUILD_DIR}/files/share/icons/hicolor/${size}x${size}/apps/io.github.Antux912012.RecGo.png"
-    install -Dm644 "${PROJECT_DIR}/data/icons/io.github.Antux912012.RecGo_${size}x${size}.png" \
-        "${BUILD_DIR}/export/share/icons/hicolor/${size}x${size}/apps/io.github.Antux912012.RecGo.png"
-done
-
-install -Dm644 "${PROJECT_DIR}/data/icons/io.github.Antux912012.RecGo.svg" \
-    "${BUILD_DIR}/files/share/icons/hicolor/scalable/apps/io.github.Antux912012.RecGo.svg"
-install -Dm644 "${PROJECT_DIR}/data/icons/io.github.Antux912012.RecGo.svg" \
-    "${BUILD_DIR}/export/share/icons/hicolor/scalable/apps/io.github.Antux912012.RecGo.svg"
-install -Dm644 "${PROJECT_DIR}/data/io.github.Antux912012.RecGo.gschema.xml" \
-    "${BUILD_DIR}/files/share/glib-2.0/schemas/io.github.Antux912012.RecGo.gschema.xml"
-install -Dm644 "${PROJECT_DIR}/data/io.github.Antux912012.RecGo.metainfo.xml" \
-    "${BUILD_DIR}/files/share/metainfo/io.github.Antux912012.RecGo.metainfo.xml"
-install -Dm644 "${PROJECT_DIR}/data/io.github.Antux912012.RecGo.metainfo.xml" \
-    "${BUILD_DIR}/export/share/metainfo/io.github.Antux912012.RecGo.metainfo.xml"
-
-if command -v glib-compile-schemas >/dev/null 2>&1; then
-    glib-compile-schemas "${BUILD_DIR}/files/share/glib-2.0/schemas"
-fi
-
-echo "==> Step 3: Exporting OSTree repo and building RecGo.flatpak bundle..."
-podman run --rm \
-    --userns=keep-id \
-    -v "${PROJECT_DIR}:/workspace:Z" \
-    -w /workspace \
-    localhost/dev-fedora:latest \
-    bash -c "glib-compile-schemas /workspace/flatpak-staging/files/share/glib-2.0/schemas && \
-        mkdir -p /workspace/flatpak-staging/files/share/app-info/xmls /workspace/flatpak-staging/files/share/app-info/icons/flatpak /workspace/flatpak-staging/export/share/app-info/xmls /workspace/flatpak-staging/export/share/app-info/icons/flatpak && \
-        appstream-compose --prefix=/workspace/flatpak-staging/files --output-dir=/workspace/flatpak-staging/files/share/app-info/xmls --icons-dir=/workspace/flatpak-staging/files/share/app-info/icons/flatpak --origin=flatpak --basename=io.github.Antux912012.RecGo io.github.Antux912012.RecGo && \
-        cp -r /workspace/flatpak-staging/files/share/app-info/* /workspace/flatpak-staging/export/share/app-info/"
+./build-in-podman.sh bash -c "DESTDIR=/workspace/flatpak-staging/files meson install -C build --no-rebuild && \
+    cp -r /workspace/flatpak-staging/files/app/* /workspace/flatpak-staging/files/ && \
+    rm -rf /workspace/flatpak-staging/files/app && \
+    mkdir -p /workspace/flatpak-staging/export/share && \
+    cp -r /workspace/flatpak-staging/files/share/applications /workspace/flatpak-staging/export/share/ && \
+    cp -r /workspace/flatpak-staging/files/share/metainfo /workspace/flatpak-staging/export/share/ && \
+    cp -r /workspace/flatpak-staging/files/share/icons /workspace/flatpak-staging/export/share/ && \
+    glib-compile-schemas /workspace/flatpak-staging/files/share/glib-2.0/schemas && \
+    mkdir -p /workspace/flatpak-staging/files/share/app-info/xmls /workspace/flatpak-staging/files/share/app-info/icons/flatpak /workspace/flatpak-staging/export/share/app-info/xmls /workspace/flatpak-staging/export/share/app-info/icons/flatpak && \
+    appstream-compose --prefix=/workspace/flatpak-staging/files --output-dir=/workspace/flatpak-staging/files/share/app-info/xmls --icons-dir=/workspace/flatpak-staging/files/share/app-info/icons/flatpak --origin=flatpak --basename=io.github.Antux912012.RecGo io.github.Antux912012.RecGo && \
+    cp -r /workspace/flatpak-staging/files/share/app-info/* /workspace/flatpak-staging/export/share/app-info/"
 
 flatpak build-export "${REPO_DIR}" "${BUILD_DIR}" stable
 flatpak build-bundle "${REPO_DIR}" "${BUNDLE_FILE}" io.github.Antux912012.RecGo stable

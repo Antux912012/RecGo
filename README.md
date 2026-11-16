@@ -9,10 +9,10 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Antux912012/RecGo/releases"><img src="https://img.shields.io/badge/version-0.1.6-blue.svg" alt="Version 0.1.6"></a>
+  <a href="https://github.com/Antux912012/RecGo/releases"><img src="https://img.shields.io/badge/version-0.2.0-blue.svg" alt="Version 0.2.0"></a>
   <a href="https://www.gnu.org/licenses/gpl-3.0"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg" alt="GPL-3.0 License"></a>
-  <a href="https://www.gtk.org/"><img src="https://img.shields.io/badge/GTK-4.14-orange.svg" alt="GTK4"></a>
-  <a href="https://gnome.pages.gitlab.gnome.org/libadwaita/"><img src="https://img.shields.io/badge/Libadwaita-1.5-purple.svg" alt="Libadwaita"></a>
+  <a href="https://www.gtk.org/"><img src="https://img.shields.io/badge/GTK-4.22-orange.svg" alt="GTK4"></a>
+  <a href="https://gnome.pages.gitlab.gnome.org/libadwaita/"><img src="https://img.shields.io/badge/Libadwaita-1.9-purple.svg" alt="Libadwaita"></a>
   <a href="https://github.com/Antux912012/RecGo"><img src="https://img.shields.io/badge/GitHub-Antux912012%2FRecGo-lightgrey.svg" alt="GitHub Repo"></a>
 </p>
 
@@ -20,7 +20,7 @@
 
 ## Overview
 
-**RecGo** is a native, HIG-compliant Wayland screen, application window, and webcam recorder tailored for GNOME. Built with Rust, GTK4, Libadwaita, GStreamer, and PipeWire, RecGo provides high framerate screen recording with near-zero CPU load using full GPU hardware acceleration (VA-API Intel/AMD, Vulkan Video, and OpenGL).
+**RecGo** is a native, HIG-compliant Wayland screen, application window, and multi-webcam recorder tailored for GNOME 51. Built with **Vala, C, Meson, GTK4, Libadwaita, GStreamer, and PipeWire**, RecGo provides high-framerate screen recording with minimal CPU overhead using GPU hardware acceleration (VA-API Intel/AMD, Vulkan Video, and OpenGL `glvideomixer`).
 
 ---
 

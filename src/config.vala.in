@@ -1,0 +1,4 @@
+namespace RecGo.Config {
+    public const string APP_ID = "io.github.Antux912012.RecGo";
+    public const string VERSION = "@VERSION@";
+}

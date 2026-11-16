@@ -2,12 +2,12 @@
 <schemalist>
   <schema id="io.github.Antux912012.RecGo" path="/io/github/Antux912012/RecGo/">
     <key name="video-codec" type="s">
-      <default>'vp9'</default>
+      <default>'h264'</default>
       <summary>Video codec for recording</summary>
       <description>The video codec used for encoding: vp8, vp9, h264, h265, or av1.</description>
     </key>
     <key name="container-format" type="s">
-      <default>'webm'</default>
+      <default>'mp4'</default>
       <summary>Container format</summary>
       <description>Container file format: webm, mp4, or mkv.</description>
     </key>
@@ -22,19 +22,49 @@
       <description>Shape mask for webcam: rectangle, square, or circle.</description>
     </key>
     <key name="webcam-pos-x" type="d">
-      <default>0.82</default>
+      <default>0.76</default>
       <summary>Webcam X position</summary>
       <description>Normalized horizontal position of the webcam overlay (0.0 to 1.0).</description>
     </key>
     <key name="webcam-pos-y" type="d">
-      <default>0.78</default>
+      <default>0.68</default>
       <summary>Webcam Y position</summary>
       <description>Normalized vertical position of the webcam overlay (0.0 to 1.0).</description>
     </key>
     <key name="webcam-scale" type="d">
       <default>0.24</default>
       <summary>Webcam overlay scale</summary>
-      <description>Scale factor of webcam overlay relative to the screen width (0.1 to 0.5).</description>
+      <description>Scale factor of webcam overlay relative to the screen width (0.1 to 0.65).</description>
+    </key>
+    <key name="countdown-seconds" type="u">
+      <default>3</default>
+      <summary>Countdown duration</summary>
+      <description>Delay in seconds before recording begins (0 to 300).</description>
+    </key>
+    <key name="custom-countdown-seconds" type="u">
+      <default>15</default>
+      <summary>Custom countdown duration</summary>
+      <description>Remembered custom countdown duration in seconds.</description>
+    </key>
+    <key name="mic-enabled" type="b">
+      <default>true</default>
+      <summary>Microphone enabled</summary>
+      <description>Whether microphone audio capture is active.</description>
+    </key>
+    <key name="gpu-compositing" type="b">
+      <default>true</default>
+      <summary>GPU compositing</summary>
+      <description>Prefer GStreamer OpenGL compositor (glvideomixer) when available.</description>
+    </key>
+    <key name="enabled-cameras" type="as">
+      <default>[]</default>
+      <summary>Enabled camera IDs</summary>
+      <description>List of enabled camera device identifiers (empty = auto-select first available).</description>
+    </key>
+    <key name="enabled-microphones" type="as">
+      <default>[]</default>
+      <summary>Enabled microphone IDs</summary>
+      <description>List of enabled microphone source identifiers (empty = default system microphone).</description>
     </key>
     <key name="shortcut-start-stop" type="s">
       <default>'&lt;Control&gt;&lt;Alt&gt;&lt;Shift&gt;R'</default>

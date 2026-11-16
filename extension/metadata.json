@@ -2,7 +2,7 @@
   "name": "RecGo Panel Indicator",
   "description": "Control RecGo screen and webcam recordings from GNOME Shell panel",
   "uuid": "recgo-indicator@antonio.github.io",
-  "shell-version": ["45", "46", "47"],
-  "version": 1,
-  "url": "https://github.com/antonio/RecGo"
+  "shell-version": ["48", "49", "50", "51"],
+  "version": 2,
+  "url": "https://github.com/Antux912012/RecGo"
 }

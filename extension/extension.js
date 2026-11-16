@@ -1,5 +1,4 @@
-// GNOME Shell Extension for RecGo.
-// Compatible with GNOME Shell 45, 46, and 47 (ESM).
+// GNOME Shell Extension for RecGo (GNOME 48-51 ESM).
 
 import GObject from 'gi://GObject';
 import St from 'gi://St';
@@ -48,6 +47,7 @@ class RecGoIndicator extends PanelMenu.Button {
         this._box.add_child(this._label);
         this.add_child(this._box);
 
+        this._propChangedId = 0;
         this._buildMenu();
         this._initProxy();
     }
@@ -82,6 +82,9 @@ class RecGoIndicator extends PanelMenu.Button {
                     console.error('Failed to connect to RecGo D-Bus service:', error);
                     return;
                 }
+                this._propChangedId = this._proxy.connect('g-properties-changed', () => {
+                    this._updateStatus();
+                });
                 this._updateStatus();
             }
         );
@@ -91,15 +94,27 @@ class RecGoIndicator extends PanelMenu.Button {
         if (!this._proxy) return;
         const state = this._proxy.State || 'idle';
         if (state === 'recording') {
-            this._icon.style = 'color: #e01b24;'; // Red recording dot
-            this._label.text = ' REC';
+            this._icon.style = 'color: #e01b24;';
+            const s = Number(this._proxy.ElapsedSeconds || 0);
+            const mins = Math.floor((s % 3600) / 60).toString().padStart(2, '0');
+            const secs = (s % 60).toString().padStart(2, '0');
+            this._label.text = ` REC ${mins}:${secs}`;
         } else if (state === 'paused') {
-            this._icon.style = 'color: #f6d32d;'; // Yellow paused dot
+            this._icon.style = 'color: #f6d32d;';
             this._label.text = ' PAUSED';
         } else {
             this._icon.style = 'color: inherit;';
             this._label.text = '';
         }
+    }
+
+    destroy() {
+        if (this._proxy && this._propChangedId) {
+            this._proxy.disconnect(this._propChangedId);
+            this._propChangedId = 0;
+        }
+        this._proxy = null;
+        super.destroy();
     }
 });
 

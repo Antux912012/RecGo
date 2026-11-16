@@ -30,6 +30,16 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.2.0" date="2026-11-16">
+      <description>
+        <p>Release v0.2.0 migrates RecGo to native Vala, C, and Meson optimized for GNOME 51:</p>
+        <ul>
+          <li>Native Vala + C Engine: Replaces the Rust/Tokio stack with native GLib/GDBus portals and a C GStreamer core for minimal footprint and faster startup.</li>
+          <li>Multi-Cam &amp; Multi-Mic Handling: Live GstDeviceMonitor hotplug discovery and simultaneous multi-camera compositing and multi-microphone audiomixer support.</li>
+          <li>GNOME 51 &amp; Performance Optimizations: Event-driven preview frame delivery, OpenGL glvideomixer compositing, synchronized device teardown, persistent GSettings, and GNOME Shell 51 panel indicator support.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.6" date="2026-11-13">
       <description>
         <p>Release v0.1.6 bundles Papirus symbolic icons inside the application resource archive:</p>
