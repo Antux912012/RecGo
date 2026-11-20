@@ -30,7 +30,7 @@ makedepends=(
     'gcc'
 )
 source=("$pkgname-$pkgver.tar.gz::https://github.com/Antux912012/RecGo/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('SKIP')
+sha256sums=('a85b239c3edfcc0fa73591bbf1a333734fbeae85e961b7f12ee3c45e9899b2ef')
 
 build() {
     cd "$srcdir/RecGo-$pkgver"
