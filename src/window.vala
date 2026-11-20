@@ -12,9 +12,33 @@ namespace RecGo {
         private Gtk.DropDown layout_dropdown;
         private Gtk.DropDown shape_dropdown;
         private Gtk.DropDown countdown_dropdown;
+        private Gtk.Switch border_switch;
+        private Gtk.Switch shadow_switch;
         private Gtk.ToggleButton cam_toggle;
         private Gtk.ToggleButton mic_toggle;
         private Gtk.Scale size_scale;
+
+        // Webcam Image FX controls
+        private Gtk.DropDown fx_preset_dropdown;
+        private Gtk.Switch fx_mirror_switch;
+        private Gtk.Switch fx_auto_switch;
+        private Gtk.Scale fx_zoom_scale;
+        private Gtk.Scale fx_brightness_scale;
+        private Gtk.Scale fx_contrast_scale;
+        private Gtk.Scale fx_gamma_scale;
+        private Gtk.Scale fx_warmth_scale;
+        private Gtk.Scale fx_saturation_scale;
+        private Gtk.Scale fx_sharpness_scale;
+        private Gtk.Scale fx_denoise_scale;
+        private Gtk.Label fx_zoom_val;
+        private Gtk.Label fx_brightness_val;
+        private Gtk.Label fx_contrast_val;
+        private Gtk.Label fx_gamma_val;
+        private Gtk.Label fx_warmth_val;
+        private Gtk.Label fx_saturation_val;
+        private Gtk.Label fx_sharpness_val;
+        private Gtk.Label fx_denoise_val;
+        private bool guard_fx_ui = false;
 
         private Gtk.Button btn_preview_screen;
         private Gtk.Button btn_record;
@@ -32,12 +56,14 @@ namespace RecGo {
         private Gst.PreviewFeed? screen_preview_feed = null;
         private CaptureStream? active_stream = null;
         private Gst.Recorder? recorder = null;
+        private string last_camera_signature = "";
 
         public bool is_recording { get; private set; default = false; }
         public bool is_paused { get; private set; default = false; }
         public uint64 elapsed_seconds { get; private set; default = 0; }
 
         private bool is_counting_down = false;
+        private bool close_after_stop = false;
         private uint countdown_source_id = 0;
         private uint osd_timer_id = 0;
         private bool guard_cam_toggle = false;
@@ -67,22 +93,42 @@ namespace RecGo {
             load_settings_into_ui ();
             start_osd_timer ();
 
+            last_camera_signature = compute_camera_signature ();
             if (cam_toggle.get_active ()) {
                 start_camera_previews ();
             }
 
             device_manager.devices_changed.connect (() => {
-                if (!is_recording && cam_toggle.get_active ()) {
-                    start_camera_previews ();
+                string sig = compute_camera_signature ();
+                if (sig != last_camera_signature) {
+                    last_camera_signature = sig;
+                    if (!is_recording && cam_toggle.get_active ()) {
+                        start_camera_previews ();
+                    }
                 }
             });
 
             close_request.connect (() => {
+                if (is_recording && recorder != null) {
+                    close_after_stop = true;
+                    stop_recording_action ();
+                    return true;
+                }
                 cleanup_on_close ();
                 return false;
             });
 
             maybe_run_screenshot_mode ();
+        }
+
+        private string compute_camera_signature () {
+            var cams = device_manager.get_cameras ();
+            var sb = new GLib.StringBuilder ();
+            for (uint i = 0; i < cams.length; i++) {
+                sb.append (cams.get (i).id);
+                sb.append_c ('|');
+            }
+            return sb.str;
         }
 
         private int find_saved_codec_index () {
@@ -93,6 +139,109 @@ namespace RecGo {
                 }
             }
             return 0;
+        }
+
+        private Gtk.Box make_fx_slider_row (string title,
+                                            double min_val,
+                                            double max_val,
+                                            double step,
+                                            out Gtk.Scale scale_out,
+                                            out Gtk.Label val_label_out) {
+            var row = new Gtk.Box (Gtk.Orientation.VERTICAL, 2);
+            var header = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 8);
+            var lbl = new Gtk.Label (title);
+            lbl.set_xalign (0.0f);
+            lbl.set_hexpand (true);
+            var vlbl = new Gtk.Label ("");
+            vlbl.add_css_class ("dim-label");
+            vlbl.add_css_class ("numeric");
+            header.append (lbl);
+            header.append (vlbl);
+
+            var sc = new Gtk.Scale.with_range (Gtk.Orientation.HORIZONTAL, min_val, max_val, step);
+            sc.set_draw_value (false);
+            sc.set_hexpand (true);
+
+            row.append (header);
+            row.append (sc);
+            scale_out = sc;
+            val_label_out = vlbl;
+            return row;
+        }
+
+        private Gtk.Box make_switch_row (string title, out Gtk.Switch sw_out) {
+            var row = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 10);
+            var lbl = new Gtk.Label (title);
+            lbl.set_xalign (0.0f);
+            lbl.set_hexpand (true);
+            var sw = new Gtk.Switch ();
+            sw.set_valign (Gtk.Align.CENTER);
+            row.append (lbl);
+            row.append (sw);
+            sw_out = sw;
+            return row;
+        }
+
+        private Gtk.Popover build_webcam_fx_popover () {
+            var outer = new Gtk.Box (Gtk.Orientation.VERTICAL, 10);
+            outer.set_margin_top (12);
+            outer.set_margin_bottom (12);
+            outer.set_margin_start (14);
+            outer.set_margin_end (14);
+            outer.set_size_request (290, -1);
+
+            var heading = new Gtk.Label ("Webcam Image Enhancements");
+            heading.set_xalign (0.0f);
+            heading.add_css_class ("heading");
+            outer.append (heading);
+
+            var preset_box = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 8);
+            var preset_lbl = new Gtk.Label ("Preset");
+            preset_lbl.set_xalign (0.0f);
+            preset_lbl.set_hexpand (true);
+            fx_preset_dropdown = new Gtk.DropDown.from_strings ({
+                "Natural (Default)",
+                "Low-Light Boost",
+                "Studio Warm",
+                "Crisp & Vivid",
+                "Black & White",
+                "Custom"
+            });
+            preset_box.append (preset_lbl);
+            preset_box.append (fx_preset_dropdown);
+            outer.append (preset_box);
+
+            outer.append (make_switch_row ("Mirror Camera (Horizontal Flip)", out fx_mirror_switch));
+            outer.append (make_switch_row ("Auto Low-Light Enhance", out fx_auto_switch));
+
+            outer.append (new Gtk.Separator (Gtk.Orientation.HORIZONTAL));
+
+            outer.append (make_fx_slider_row ("Digital Zoom", 1.0, 2.5, 0.05, out fx_zoom_scale, out fx_zoom_val));
+            outer.append (make_fx_slider_row ("Brightness", -0.5, 0.5, 0.02, out fx_brightness_scale, out fx_brightness_val));
+            outer.append (make_fx_slider_row ("Contrast", 0.5, 2.0, 0.02, out fx_contrast_scale, out fx_contrast_val));
+            outer.append (make_fx_slider_row ("Exposure / Gamma", 0.5, 2.0, 0.02, out fx_gamma_scale, out fx_gamma_val));
+            outer.append (make_fx_slider_row ("Warmth (Cool ↔ Warm)", -1.0, 1.0, 0.04, out fx_warmth_scale, out fx_warmth_val));
+            outer.append (make_fx_slider_row ("Saturation", 0.0, 2.0, 0.02, out fx_saturation_scale, out fx_saturation_val));
+            outer.append (make_fx_slider_row ("Sharpness", 0.0, 1.0, 0.05, out fx_sharpness_scale, out fx_sharpness_val));
+            outer.append (make_fx_slider_row ("Noise Reduction", 0.0, 1.0, 0.05, out fx_denoise_scale, out fx_denoise_val));
+
+            var reset_btn = new Gtk.Button.with_label ("Reset Image Settings");
+            reset_btn.set_margin_top (4);
+            reset_btn.clicked.connect (() => {
+                apply_fx_preset (0);
+                toast_overlay.add_toast (new Adw.Toast ("Webcam image reset to defaults"));
+            });
+            outer.append (reset_btn);
+
+            var scroll = new Gtk.ScrolledWindow ();
+            scroll.set_policy (Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC);
+            scroll.set_propagate_natural_height (true);
+            scroll.set_max_content_height (460);
+            scroll.set_child (outer);
+
+            var popover = new Gtk.Popover ();
+            popover.set_child (scroll);
+            return popover;
         }
 
         private void build_ui () {
@@ -130,9 +279,9 @@ namespace RecGo {
             header.pack_start (layout_dropdown);
 
             shape_dropdown = new Gtk.DropDown.from_strings ({
-                "Circle (Shadow)",
-                "Square (Shadow)",
-                "Rectangle (Shadow)"
+                "Circle (Masked)",
+                "Square (Rounded)",
+                "Rectangle (Rounded)"
             });
             shape_dropdown.set_tooltip_text ("Webcam Enclosure Shape");
 
@@ -159,12 +308,15 @@ namespace RecGo {
             framing_box.set_margin_bottom (12);
             framing_box.set_margin_start (12);
             framing_box.set_margin_end (12);
+            framing_box.set_size_request (240, -1);
 
-            var shape_lbl = new Gtk.Label ("Webcam Shape");
+            var shape_lbl = new Gtk.Label ("Webcam Shape & Mask");
             shape_lbl.set_xalign (0.0f);
             shape_lbl.add_css_class ("heading");
             framing_box.append (shape_lbl);
             framing_box.append (shape_dropdown);
+            framing_box.append (make_switch_row ("Mask Border", out border_switch));
+            framing_box.append (make_switch_row ("Drop Shadow", out shadow_switch));
 
             var cd_lbl = new Gtk.Label ("Recording Delay");
             cd_lbl.set_xalign (0.0f);
@@ -177,9 +329,15 @@ namespace RecGo {
             framing_popover.set_child (framing_box);
             var framing_btn = new Gtk.MenuButton ();
             framing_btn.set_icon_name ("preferences-other-symbolic");
-            framing_btn.set_tooltip_text ("Webcam Shape & Countdown Timer");
+            framing_btn.set_tooltip_text ("Webcam Shape, Mask & Countdown Timer");
             framing_btn.set_popover (framing_popover);
             header.pack_end (framing_btn);
+
+            var fx_btn = new Gtk.MenuButton ();
+            fx_btn.set_label ("Image FX");
+            fx_btn.set_tooltip_text ("Webcam Image Enhancements (Brightness, Contrast, Mirror, Low-Light, Zoom)");
+            fx_btn.set_popover (build_webcam_fx_popover ());
+            header.pack_end (fx_btn);
 
             cam_toggle = new Gtk.ToggleButton ();
             cam_toggle.set_icon_name ("camera-web-symbolic");
@@ -293,6 +451,135 @@ namespace RecGo {
             connect_ui_signals ();
         }
 
+        private Gst.WebcamImageConfig current_image_config () {
+            Gst.WebcamImageConfig cfg;
+            Gst.webcam_image_config_init_defaults (out cfg);
+            cfg.mirror = settings.get_boolean ("webcam-mirror");
+            cfg.auto_enhance = settings.get_boolean ("webcam-auto-enhance");
+            cfg.brightness = settings.get_double ("webcam-brightness");
+            cfg.contrast = settings.get_double ("webcam-contrast");
+            cfg.saturation = settings.get_double ("webcam-saturation");
+            cfg.warmth = settings.get_double ("webcam-warmth");
+            cfg.gamma = settings.get_double ("webcam-gamma");
+            cfg.sharpness = settings.get_double ("webcam-sharpness");
+            cfg.denoise = settings.get_double ("webcam-denoise");
+            cfg.zoom = settings.get_double ("webcam-zoom");
+            cfg.border_enabled = settings.get_boolean ("webcam-border");
+            cfg.shadow_enabled = settings.get_boolean ("webcam-shadow");
+            return cfg;
+        }
+
+        private void update_fx_value_labels () {
+            fx_zoom_val.set_text ("%.2f×".printf (fx_zoom_scale.get_value ()));
+            fx_brightness_val.set_text ("%+.0f%%".printf (fx_brightness_scale.get_value () * 100.0));
+            fx_contrast_val.set_text ("%.0f%%".printf (fx_contrast_scale.get_value () * 100.0));
+            fx_gamma_val.set_text ("%.0f%%".printf (fx_gamma_scale.get_value () * 100.0));
+            fx_warmth_val.set_text ("%+.0f".printf (fx_warmth_scale.get_value () * 100.0));
+            fx_saturation_val.set_text ("%.0f%%".printf (fx_saturation_scale.get_value () * 100.0));
+            fx_sharpness_val.set_text ("%.0f%%".printf (fx_sharpness_scale.get_value () * 100.0));
+            fx_denoise_val.set_text ("%.0f%%".printf (fx_denoise_scale.get_value () * 100.0));
+        }
+
+        private void propagate_image_config () {
+            var cfg = current_image_config ();
+            preview.border_enabled = cfg.border_enabled;
+            preview.shadow_enabled = cfg.shadow_enabled;
+            for (uint i = 0; i < webcam_feeds.length; i++) {
+                webcam_feeds.get (i).update_image_config (cfg);
+            }
+            if (recorder != null) {
+                recorder.update_image_config (cfg);
+            }
+        }
+
+        private void save_fx_ui_to_settings (bool mark_custom) {
+            if (guard_fx_ui)
+                return;
+
+            settings.set_boolean ("webcam-mirror", fx_mirror_switch.get_active ());
+            settings.set_boolean ("webcam-auto-enhance", fx_auto_switch.get_active ());
+            settings.set_double ("webcam-zoom", fx_zoom_scale.get_value ());
+            settings.set_double ("webcam-brightness", fx_brightness_scale.get_value ());
+            settings.set_double ("webcam-contrast", fx_contrast_scale.get_value ());
+            settings.set_double ("webcam-gamma", fx_gamma_scale.get_value ());
+            settings.set_double ("webcam-warmth", fx_warmth_scale.get_value ());
+            settings.set_double ("webcam-saturation", fx_saturation_scale.get_value ());
+            settings.set_double ("webcam-sharpness", fx_sharpness_scale.get_value ());
+            settings.set_double ("webcam-denoise", fx_denoise_scale.get_value ());
+
+            if (mark_custom) {
+                guard_fx_ui = true;
+                fx_preset_dropdown.set_selected (5);
+                guard_fx_ui = false;
+            }
+
+            update_fx_value_labels ();
+            propagate_image_config ();
+        }
+
+        private void apply_fx_preset (uint preset_idx) {
+            guard_fx_ui = true;
+            switch (preset_idx) {
+            case 0: // Natural (Default)
+                fx_auto_switch.set_active (false);
+                fx_zoom_scale.set_value (1.0);
+                fx_brightness_scale.set_value (0.0);
+                fx_contrast_scale.set_value (1.0);
+                fx_gamma_scale.set_value (1.0);
+                fx_warmth_scale.set_value (0.0);
+                fx_saturation_scale.set_value (1.0);
+                fx_sharpness_scale.set_value (0.0);
+                fx_denoise_scale.set_value (0.0);
+                break;
+            case 1: // Low-Light Boost
+                fx_auto_switch.set_active (true);
+                fx_brightness_scale.set_value (0.06);
+                fx_contrast_scale.set_value (1.08);
+                fx_gamma_scale.set_value (1.26);
+                fx_warmth_scale.set_value (0.08);
+                fx_saturation_scale.set_value (1.05);
+                fx_sharpness_scale.set_value (0.15);
+                fx_denoise_scale.set_value (0.45);
+                break;
+            case 2: // Studio Warm
+                fx_auto_switch.set_active (false);
+                fx_brightness_scale.set_value (0.02);
+                fx_contrast_scale.set_value (1.10);
+                fx_gamma_scale.set_value (1.08);
+                fx_warmth_scale.set_value (0.30);
+                fx_saturation_scale.set_value (1.12);
+                fx_sharpness_scale.set_value (0.25);
+                fx_denoise_scale.set_value (0.20);
+                break;
+            case 3: // Crisp & Vivid
+                fx_auto_switch.set_active (false);
+                fx_brightness_scale.set_value (0.0);
+                fx_contrast_scale.set_value (1.16);
+                fx_gamma_scale.set_value (1.04);
+                fx_warmth_scale.set_value (0.05);
+                fx_saturation_scale.set_value (1.28);
+                fx_sharpness_scale.set_value (0.45);
+                fx_denoise_scale.set_value (0.15);
+                break;
+            case 4: // Black & White
+                fx_auto_switch.set_active (false);
+                fx_brightness_scale.set_value (0.0);
+                fx_contrast_scale.set_value (1.18);
+                fx_gamma_scale.set_value (1.0);
+                fx_warmth_scale.set_value (0.0);
+                fx_saturation_scale.set_value (0.0);
+                fx_sharpness_scale.set_value (0.20);
+                fx_denoise_scale.set_value (0.15);
+                break;
+            default:
+                guard_fx_ui = false;
+                return;
+            }
+            fx_preset_dropdown.set_selected (preset_idx);
+            guard_fx_ui = false;
+            save_fx_ui_to_settings (false);
+        }
+
         private void register_window_actions () {
             var pref_action = new GLib.SimpleAction ("preferences", null);
             pref_action.activate.connect (() => {
@@ -329,7 +616,7 @@ namespace RecGo {
                 about.set_application_icon ("io.github.Antux912012.RecGo");
                 about.set_developer_name ("Antonio De Gaetano");
                 about.set_version (Config.VERSION);
-                about.set_comments ("High-performance GPU-accelerated multi-cam and desktop recorder for GNOME 51.");
+                about.set_comments ("High-performance GPU-accelerated multi-cam and desktop recorder for GNOME.");
                 about.set_website ("https://github.com/Antux912012/RecGo");
                 about.set_issue_url ("https://github.com/Antux912012/RecGo/issues");
                 about.set_license_type (Gtk.License.GPL_3_0);
@@ -355,6 +642,13 @@ namespace RecGo {
             shape_dropdown.set_selected (shape_idx);
             preview.shape = shape_from_index (shape_idx);
 
+            bool border_on = settings.get_boolean ("webcam-border");
+            bool shadow_on = settings.get_boolean ("webcam-shadow");
+            border_switch.set_active (border_on);
+            shadow_switch.set_active (shadow_on);
+            preview.border_enabled = border_on;
+            preview.shadow_enabled = shadow_on;
+
             preview.overlay_x = settings.get_double ("webcam-pos-x");
             preview.overlay_y = settings.get_double ("webcam-pos-y");
             double sc = settings.get_double ("webcam-scale").clamp (0.10, 0.65);
@@ -362,6 +656,21 @@ namespace RecGo {
             guard_scale = true;
             size_scale.set_value (sc);
             guard_scale = false;
+
+            guard_fx_ui = true;
+            fx_mirror_switch.set_active (settings.get_boolean ("webcam-mirror"));
+            fx_auto_switch.set_active (settings.get_boolean ("webcam-auto-enhance"));
+            fx_zoom_scale.set_value (settings.get_double ("webcam-zoom").clamp (1.0, 2.5));
+            fx_brightness_scale.set_value (settings.get_double ("webcam-brightness").clamp (-0.5, 0.5));
+            fx_contrast_scale.set_value (settings.get_double ("webcam-contrast").clamp (0.5, 2.0));
+            fx_gamma_scale.set_value (settings.get_double ("webcam-gamma").clamp (0.5, 2.0));
+            fx_warmth_scale.set_value (settings.get_double ("webcam-warmth").clamp (-1.0, 1.0));
+            fx_saturation_scale.set_value (settings.get_double ("webcam-saturation").clamp (0.0, 2.0));
+            fx_sharpness_scale.set_value (settings.get_double ("webcam-sharpness").clamp (0.0, 1.0));
+            fx_denoise_scale.set_value (settings.get_double ("webcam-denoise").clamp (0.0, 1.0));
+            fx_preset_dropdown.set_selected (0);
+            update_fx_value_labels ();
+            guard_fx_ui = false;
 
             mic_toggle.set_active (settings.get_boolean ("mic-enabled"));
             sync_countdown_dropdown (settings.get_uint ("countdown-seconds"));
@@ -373,6 +682,14 @@ namespace RecGo {
             case 2:  return Gst.WebcamShape.RECTANGLE;
             default: return Gst.WebcamShape.CIRCLE;
             }
+        }
+
+        private static Gst.PerformanceMode perf_mode_from_string (string mode) {
+            if (mode == "low-power")
+                return Gst.PerformanceMode.LOW_POWER;
+            if (mode == "quality")
+                return Gst.PerformanceMode.QUALITY;
+            return Gst.PerformanceMode.BALANCED;
         }
 
         private void sync_countdown_dropdown (uint secs) {
@@ -401,6 +718,37 @@ namespace RecGo {
                 string[] keys = { "circle", "square", "rectangle" };
                 settings.set_string ("webcam-shape", keys[sel < keys.length ? sel : 0]);
             });
+
+            border_switch.notify["active"].connect (() => {
+                bool on = border_switch.get_active ();
+                settings.set_boolean ("webcam-border", on);
+                propagate_image_config ();
+            });
+
+            shadow_switch.notify["active"].connect (() => {
+                bool on = shadow_switch.get_active ();
+                settings.set_boolean ("webcam-shadow", on);
+                propagate_image_config ();
+            });
+
+            fx_preset_dropdown.notify["selected"].connect (() => {
+                if (guard_fx_ui) return;
+                uint sel = fx_preset_dropdown.get_selected ();
+                if (sel <= 4) {
+                    apply_fx_preset (sel);
+                }
+            });
+
+            fx_mirror_switch.notify["active"].connect (() => save_fx_ui_to_settings (false));
+            fx_auto_switch.notify["active"].connect (() => save_fx_ui_to_settings (true));
+            fx_zoom_scale.value_changed.connect (() => save_fx_ui_to_settings (false));
+            fx_brightness_scale.value_changed.connect (() => save_fx_ui_to_settings (true));
+            fx_contrast_scale.value_changed.connect (() => save_fx_ui_to_settings (true));
+            fx_gamma_scale.value_changed.connect (() => save_fx_ui_to_settings (true));
+            fx_warmth_scale.value_changed.connect (() => save_fx_ui_to_settings (true));
+            fx_saturation_scale.value_changed.connect (() => save_fx_ui_to_settings (true));
+            fx_sharpness_scale.value_changed.connect (() => save_fx_ui_to_settings (true));
+            fx_denoise_scale.value_changed.connect (() => save_fx_ui_to_settings (true));
 
             size_scale.value_changed.connect (() => {
                 if (guard_scale) return;
@@ -545,12 +893,13 @@ namespace RecGo {
             stop_camera_previews ();
             var selected = resolve_selected_devices ("enabled-cameras", device_manager.get_cameras (), false);
             preview.set_webcam_count (selected.length);
+            var img_cfg = current_image_config ();
 
             for (uint i = 0; i < selected.length; i++) {
                 uint cam_idx = i;
                 unowned var dev = selected.get (i);
                 try {
-                    var feed = Gst.PreviewFeed.new_camera (dev);
+                    var feed = Gst.PreviewFeed.new_camera (dev, img_cfg);
                     if (feed != null) {
                         feed.frame_ready.connect ((tex) => {
                             preview.set_webcam_texture (cam_idx, tex);
@@ -720,13 +1069,15 @@ namespace RecGo {
 
             // Synchronously release preview pipelines before opening devices for recording (prevents EBUSY)
             stop_screen_preview ();
-            if (layout != Gst.LayoutPreset.SCREEN_ONLY) {
+            bool include_cams = (layout == Gst.LayoutPreset.CAMERA_ONLY)
+                             || (layout != Gst.LayoutPreset.SCREEN_ONLY && cam_toggle.get_active ());
+            if (include_cams) {
                 stop_camera_previews ();
             }
 
-            var cameras = (layout == Gst.LayoutPreset.SCREEN_ONLY)
-                ? new GLib.GenericArray<Gst.DeviceInfo> ()
-                : resolve_selected_devices ("enabled-cameras", device_manager.get_cameras (), false);
+            var cameras = include_cams
+                ? resolve_selected_devices ("enabled-cameras", device_manager.get_cameras (), false)
+                : new GLib.GenericArray<Gst.DeviceInfo> ();
 
             var mics = resolve_selected_devices ("enabled-microphones", device_manager.get_microphones (), true);
 
@@ -743,19 +1094,16 @@ namespace RecGo {
             cfg.overlay_x = preview.overlay_x;
             cfg.overlay_y = preview.overlay_y;
             cfg.overlay_scale = preview.overlay_scale;
+            cfg.image_config = current_image_config ();
             cfg.codec = codec;
             cfg.container = container;
             cfg.prefer_gpu_compositing = settings.get_boolean ("gpu-compositing");
+            cfg.target_fps = settings.get_uint ("target-fps");
+            cfg.performance_mode = perf_mode_from_string (settings.get_string ("performance-mode"));
             cfg.output_path = out_path;
 
             try {
                 recorder = new Gst.Recorder (cfg);
-                var prev_feed = recorder.get_preview_feed ();
-                if (prev_feed != null) {
-                    prev_feed.frame_ready.connect ((tex) => {
-                        preview.set_screen_texture (tex);
-                    });
-                }
                 recorder.stopped.connect (() => {
                     on_recorder_stopped ();
                 });
@@ -764,6 +1112,14 @@ namespace RecGo {
                 });
 
                 recorder.start ();
+
+                // Connect preview feed AFTER start() so any automatic HW->SW fallback pipeline is hooked up
+                var prev_feed = recorder.get_preview_feed ();
+                if (prev_feed != null) {
+                    prev_feed.frame_ready.connect ((tex) => {
+                        preview.set_screen_texture (tex);
+                    });
+                }
 
                 is_recording = true;
                 is_paused = false;
@@ -832,6 +1188,13 @@ namespace RecGo {
             btn_pause.set_active (false);
             btn_record.set_sensitive (true);
             btn_preview_screen.set_sensitive (true);
+
+            if (close_after_stop) {
+                close_after_stop = false;
+                cleanup_on_close ();
+                destroy ();
+                return;
+            }
 
             if (cam_toggle.get_active ()) {
                 start_camera_previews ();

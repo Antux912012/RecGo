@@ -3,6 +3,7 @@
 #include "recgo-codecs.h"
 #include "recgo-devices.h"
 #include "recgo-preview.h"
+#include "recgo-video-fx.h"
 #include <glib-object.h>
 
 G_BEGIN_DECLS
@@ -15,10 +16,10 @@ typedef enum {
 } RecGoLayoutPreset;
 
 typedef enum {
-    RECGO_SHAPE_RECTANGLE = 0,
-    RECGO_SHAPE_SQUARE    = 1,
-    RECGO_SHAPE_CIRCLE    = 2
-} RecGoWebcamShape;
+    RECGO_PERF_LOW_POWER = 0,
+    RECGO_PERF_BALANCED  = 1,
+    RECGO_PERF_QUALITY   = 2
+} RecGoPerformanceMode;
 
 typedef struct {
     int screen_fd;          /* -1 if no screen stream */
@@ -36,9 +37,13 @@ typedef struct {
     gdouble overlay_y;
     gdouble overlay_scale;
 
+    RecGoWebcamImageConfig image_config;
+
     RecGoVideoCodec codec;
     RecGoContainerFormat container;
     gboolean prefer_gpu_compositing;
+    guint target_fps;
+    RecGoPerformanceMode performance_mode;
     const gchar *output_path;
 } RecGoRecordConfig;
 
@@ -51,6 +56,9 @@ gboolean recgo_recorder_start (RecGoRecorder *self, GError **error);
 gboolean recgo_recorder_pause (RecGoRecorder *self, GError **error);
 gboolean recgo_recorder_resume (RecGoRecorder *self, GError **error);
 void recgo_recorder_stop_async (RecGoRecorder *self);
+
+void recgo_recorder_update_image_config (RecGoRecorder *self,
+                                         const RecGoWebcamImageConfig *image_cfg);
 
 const gchar *recgo_recorder_get_encoder_description (RecGoRecorder *self);
 RecGoPreviewFeed *recgo_recorder_get_preview_feed (RecGoRecorder *self);

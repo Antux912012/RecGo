@@ -22,19 +22,19 @@ case "${CMD}" in
             "${CONTAINER_IMAGE}" bash
         ;;
     setup)
-        exec podman run --rm --userns=keep-id \
+        exec podman run --rm --network=none --userns=keep-id \
             -v "${PROJECT_DIR}:/workspace:Z" -w /workspace \
             "${CONTAINER_IMAGE}" \
             meson setup "${BUILD_DIR}" --wipe "$@"
         ;;
     build)
-        exec podman run --rm --userns=keep-id \
+        exec podman run --rm --network=none --userns=keep-id \
             -v "${PROJECT_DIR}:/workspace:Z" -w /workspace \
             "${CONTAINER_IMAGE}" \
             bash -c "[ -d '${BUILD_DIR}' ] || meson setup '${BUILD_DIR}'; meson compile -C '${BUILD_DIR}' $*"
         ;;
     test)
-        exec podman run --rm --userns=keep-id \
+        exec podman run --rm --network=none --userns=keep-id \
             -v "${PROJECT_DIR}:/workspace:Z" -w /workspace \
             "${CONTAINER_IMAGE}" \
             bash -c "[ -d '${BUILD_DIR}' ] || meson setup '${BUILD_DIR}'; meson compile -C '${BUILD_DIR}' && meson test -C '${BUILD_DIR}' --print-errorlogs $*"
@@ -43,7 +43,7 @@ case "${CMD}" in
         rm -rf "${PROJECT_DIR}/${BUILD_DIR}"
         ;;
     *)
-        exec podman run --rm --userns=keep-id \
+        exec podman run --rm --network=none --userns=keep-id \
             -v "${PROJECT_DIR}:/workspace:Z" -w /workspace \
             "${CONTAINER_IMAGE}" \
             "${CMD}" "$@"

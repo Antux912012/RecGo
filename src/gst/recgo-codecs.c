@@ -158,6 +158,54 @@ recgo_detect_encoder (RecGoVideoCodec codec,
     }
 }
 
+void
+recgo_detect_software_encoder (RecGoVideoCodec codec,
+                               gchar **element_out,
+                               gchar **backend_out)
+{
+    static const struct {
+        const gchar *element;
+        const gchar *backend;
+    } sw_fallbacks[] = {
+        { "x264enc",     "Software CPU Fallback (x264)" },
+        { "openh264enc", "Software CPU Fallback (OpenH264)" },
+        { "vp8enc",      "Software CPU Fallback (libvpx)" },
+        { "vp9enc",      "Software CPU Fallback (libvpx)" },
+    };
+
+    if (codec == RECGO_CODEC_VP8 && recgo_has_gst_element ("vp8enc")) {
+        *element_out = g_strdup ("vp8enc");
+        *backend_out = g_strdup ("Software CPU Fallback (libvpx)");
+        return;
+    }
+    if (codec == RECGO_CODEC_VP9 && recgo_has_gst_element ("vp9enc")) {
+        *element_out = g_strdup ("vp9enc");
+        *backend_out = g_strdup ("Software CPU Fallback (libvpx)");
+        return;
+    }
+    if (codec == RECGO_CODEC_H265 && recgo_has_gst_element ("x265enc")) {
+        *element_out = g_strdup ("x265enc");
+        *backend_out = g_strdup ("Software CPU Fallback (x265)");
+        return;
+    }
+    if (codec == RECGO_CODEC_AV1 && recgo_has_gst_element ("svtav1enc")) {
+        *element_out = g_strdup ("svtav1enc");
+        *backend_out = g_strdup ("Software CPU Fallback (SVT-AV1)");
+        return;
+    }
+
+    for (gsize i = 0; i < G_N_ELEMENTS (sw_fallbacks); i++) {
+        if (recgo_has_gst_element (sw_fallbacks[i].element)) {
+            *element_out = g_strdup (sw_fallbacks[i].element);
+            *backend_out = g_strdup (sw_fallbacks[i].backend);
+            return;
+        }
+    }
+
+    *element_out = g_strdup ("x264enc");
+    *backend_out = g_strdup ("Software CPU Fallback");
+}
+
 GPtrArray *
 recgo_get_supported_codecs (void)
 {

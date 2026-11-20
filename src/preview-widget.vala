@@ -6,6 +6,8 @@ namespace RecGo {
         public double overlay_scale { get; set; default = 0.24; }
         public Gst.WebcamShape shape { get; set; default = Gst.WebcamShape.CIRCLE; }
         public Gst.LayoutPreset layout { get; set; default = Gst.LayoutPreset.DESKTOP_PIP; }
+        public bool border_enabled { get; set; default = true; }
+        public bool shadow_enabled { get; set; default = true; }
         public bool is_recording { get; private set; default = false; }
         public bool is_paused { get; private set; default = false; }
         public int countdown { get; private set; default = -1; }
@@ -19,30 +21,37 @@ namespace RecGo {
         private double drag_start_y = 0.68;
         private double drag_start_scale = 0.24;
         private bool is_resizing = false;
-        private float last_cam_x = 0;
-        private float last_cam_y = 0;
-        private float last_cam_w = 160;
-        private float last_cam_h = 160;
+        private float last_handle_x = 0;
+        private float last_handle_y = 0;
 
         construct {
             hexpand = true;
             vexpand = true;
             overflow = Gtk.Overflow.HIDDEN;
 
+            notify["shape"].connect (() => queue_draw ());
+            notify["layout"].connect (() => queue_draw ());
+            notify["border-enabled"].connect (() => queue_draw ());
+            notify["shadow-enabled"].connect (() => queue_draw ());
+
             var drag = new Gtk.GestureDrag ();
             drag.drag_begin.connect ((start_x, start_y) => {
+                if (is_recording || layout != Gst.LayoutPreset.DESKTOP_PIP)
+                    return;
+
                 drag_start_x = overlay_x;
                 drag_start_y = overlay_y;
                 drag_start_scale = overlay_scale;
 
-                float handle_x = last_cam_x + last_cam_w;
-                float handle_y = last_cam_y + last_cam_h;
-                float dx = (float) start_x - handle_x;
-                float dy = (float) start_y - handle_y;
-                is_resizing = (dx * dx + dy * dy) <= (36.0f * 36.0f);
+                float dx = (float) start_x - last_handle_x;
+                float dy = (float) start_y - last_handle_y;
+                is_resizing = (dx * dx + dy * dy) <= (28.0f * 28.0f);
             });
 
             drag.drag_update.connect ((offset_x, offset_y) => {
+                if (is_recording || layout != Gst.LayoutPreset.DESKTOP_PIP)
+                    return;
+
                 double w = double.max (100.0, (double) get_width () - 40.0);
                 double h = double.max (100.0, (double) get_height () - 40.0);
 
@@ -60,6 +69,9 @@ namespace RecGo {
 
             var scroll = new Gtk.EventControllerScroll (Gtk.EventControllerScrollFlags.VERTICAL);
             scroll.scroll.connect ((dx, dy) => {
+                if (is_recording || layout != Gst.LayoutPreset.DESKTOP_PIP)
+                    return false;
+
                 overlay_scale = (overlay_scale - dy * 0.02).clamp (0.10, 0.65);
                 queue_draw ();
                 overlay_changed ();
@@ -124,27 +136,33 @@ namespace RecGo {
             float stage_w = float.max (100.0f, width - pad * 2.0f);
             float stage_h = float.max (80.0f, height - pad * 2.0f);
 
-            switch (layout) {
-            case Gst.LayoutPreset.DESKTOP_PIP:
-            case Gst.LayoutPreset.SCREEN_ONLY:
+            if (is_recording) {
+                // During recording, screen_texture carries the live composited recording output
+                // (with the baked webcam mask, border, shadow, and image FX).
                 draw_screen_stage (snapshot, pad, pad, stage_w, stage_h);
-                if (layout == Gst.LayoutPreset.DESKTOP_PIP) {
-                    draw_primary_webcam (snapshot, pad, pad, stage_w, stage_h);
-                    draw_secondary_webcams (snapshot, pad, pad, stage_w, stage_h);
-                }
-                break;
+            } else {
+                switch (layout) {
+                case Gst.LayoutPreset.DESKTOP_PIP:
+                case Gst.LayoutPreset.SCREEN_ONLY:
+                    draw_screen_stage (snapshot, pad, pad, stage_w, stage_h);
+                    if (layout == Gst.LayoutPreset.DESKTOP_PIP && webcam_textures.length > 0) {
+                        draw_primary_webcam (snapshot, pad, pad, stage_w, stage_h);
+                        draw_secondary_webcams (snapshot, pad, pad, stage_w, stage_h);
+                    }
+                    break;
 
-            case Gst.LayoutPreset.SIDE_BY_SIDE:
-                draw_side_by_side (snapshot, pad, pad, stage_w, stage_h);
-                break;
+                case Gst.LayoutPreset.SIDE_BY_SIDE:
+                    draw_side_by_side (snapshot, pad, pad, stage_w, stage_h);
+                    break;
 
-            case Gst.LayoutPreset.CAMERA_ONLY:
-                if (webcam_textures.length <= 1) {
-                    draw_primary_webcam (snapshot, pad, pad, stage_w, stage_h);
-                } else {
-                    draw_camera_grid (snapshot, pad, pad, stage_w, stage_h);
+                case Gst.LayoutPreset.CAMERA_ONLY:
+                    if (webcam_textures.length <= 1) {
+                        draw_camera_full (snapshot, pad, pad, stage_w, stage_h);
+                    } else {
+                        draw_camera_grid (snapshot, pad, pad, stage_w, stage_h);
+                    }
+                    break;
                 }
-                break;
             }
 
             if (countdown > 0) {
@@ -164,7 +182,7 @@ namespace RecGo {
                 var top_bar = Graphene.Rect ().init (x, y, w, 26.0f);
                 snapshot.append_color (rgba (0.07f, 0.08f, 0.11f, 0.92f), top_bar);
 
-                if (countdown <= 0) {
+                if (countdown <= 0 && !is_recording) {
                     draw_empty_state_text (snapshot, x, y, w, h);
                 }
             }
@@ -180,6 +198,24 @@ namespace RecGo {
             }
             snapshot.append_border (rounded, { 2.5f, 2.5f, 2.5f, 2.5f },
                                     { border_color, border_color, border_color, border_color });
+        }
+
+        private void draw_camera_full (Gtk.Snapshot snapshot, float x, float y, float w, float h) {
+            var rect = Graphene.Rect ().init (x, y, w, h);
+            var rounded = Gsk.RoundedRect ().init_from_rect (rect, 12.0f);
+
+            snapshot.push_rounded_clip (rounded);
+            Gdk.Texture? cam_tex = (webcam_textures.length > 0) ? webcam_textures.get (0) : null;
+            if (cam_tex != null) {
+                draw_texture_cover (snapshot, cam_tex, rect);
+            } else {
+                snapshot.append_color (rgba (0.14f, 0.22f, 0.28f, 1.0f), rect);
+            }
+            snapshot.pop ();
+
+            var border_c = rgba (0.35f, 0.42f, 0.55f, 0.65f);
+            snapshot.append_border (rounded, { 2.5f, 2.5f, 2.5f, 2.5f },
+                                    { border_c, border_c, border_c, border_c });
         }
 
         private void draw_empty_state_text (Gtk.Snapshot snapshot, float x, float y, float w, float h) {
@@ -258,55 +294,56 @@ namespace RecGo {
             float x = stage_x + ((float) overlay_x * max_x).clamp (0.0f, max_x);
             float y = stage_y + ((float) overlay_y * max_y).clamp (0.0f, max_y);
 
-            last_cam_x = x;
-            last_cam_y = y;
-            last_cam_w = cam_w;
-            last_cam_h = cam_h;
-
             var cam_rect = Graphene.Rect ().init (x, y, cam_w, cam_h);
             float radius = (shape == Gst.WebcamShape.CIRCLE) ? (cam_w / 2.0f)
-                         : (shape == Gst.WebcamShape.SQUARE ? 22.0f : 14.0f);
+                         : (shape == Gst.WebcamShape.SQUARE ? (cam_w * 0.09f).clamp (8.0f, 26.0f)
+                                                            : (cam_h * 0.07f).clamp (6.0f, 18.0f));
             var rounded = Gsk.RoundedRect ().init_from_rect (cam_rect, radius);
 
-            snapshot.append_outset_shadow (rounded, rgba (0.0f, 0.0f, 0.0f, 0.72f), 0.0f, 8.0f, 3.0f, 20.0f);
+            if (shadow_enabled) {
+                snapshot.append_outset_shadow (rounded, rgba (0.0f, 0.0f, 0.0f, 0.68f), 0.0f, 6.0f, 2.0f, 16.0f);
+            }
 
             snapshot.push_rounded_clip (rounded);
             Gdk.Texture? cam_tex = (webcam_textures.length > 0) ? webcam_textures.get (0) : null;
             if (cam_tex != null) {
                 draw_texture_cover (snapshot, cam_tex, cam_rect);
-            } else if (!is_recording) {
+            } else {
                 snapshot.append_color (rgba (0.18f, 0.34f, 0.40f, 1.0f), cam_rect);
             }
             snapshot.pop ();
 
-            var border_c = rgba (1.0f, 1.0f, 1.0f, 0.90f);
-            snapshot.append_border (rounded, { 2.5f, 2.5f, 2.5f, 2.5f },
-                                    { border_c, border_c, border_c, border_c });
-
-            if (!is_recording) {
-                float handle_size = 16.0f;
-                float hx, hy;
-                if (shape == Gst.WebcamShape.CIRCLE) {
-                    float r = cam_w / 2.0f;
-                    float offset = r * 0.7071f;
-                    hx = x + r + offset - handle_size / 2.0f;
-                    hy = y + r + offset - handle_size / 2.0f;
-                } else {
-                    hx = x + cam_w - handle_size * 0.75f;
-                    hy = y + cam_h - handle_size * 0.75f;
-                }
-                var handle_rect = Graphene.Rect ().init (hx, hy, handle_size, handle_size);
-                var handle_rounded = Gsk.RoundedRect ().init_from_rect (handle_rect, handle_size / 2.0f);
-                snapshot.push_rounded_clip (handle_rounded);
-                snapshot.append_color (rgba (0.21f, 0.52f, 0.89f, 1.0f), handle_rect);
-                snapshot.pop ();
-                var hb = rgba (1.0f, 1.0f, 1.0f, 0.95f);
-                snapshot.append_border (handle_rounded, { 2.0f, 2.0f, 2.0f, 2.0f }, { hb, hb, hb, hb });
+            if (border_enabled) {
+                var border_c = rgba (1.0f, 1.0f, 1.0f, 0.92f);
+                snapshot.append_border (rounded, { 2.5f, 2.5f, 2.5f, 2.5f },
+                                        { border_c, border_c, border_c, border_c });
             }
+
+            float handle_size = 16.0f;
+            float hx, hy;
+            if (shape == Gst.WebcamShape.CIRCLE) {
+                float r = cam_w / 2.0f;
+                float offset = r * 0.7071f;
+                hx = x + r + offset - handle_size / 2.0f;
+                hy = y + r + offset - handle_size / 2.0f;
+            } else {
+                hx = x + cam_w - handle_size * 0.75f;
+                hy = y + cam_h - handle_size * 0.75f;
+            }
+            last_handle_x = hx + handle_size / 2.0f;
+            last_handle_y = hy + handle_size / 2.0f;
+
+            var handle_rect = Graphene.Rect ().init (hx, hy, handle_size, handle_size);
+            var handle_rounded = Gsk.RoundedRect ().init_from_rect (handle_rect, handle_size / 2.0f);
+            snapshot.push_rounded_clip (handle_rounded);
+            snapshot.append_color (rgba (0.21f, 0.52f, 0.89f, 1.0f), handle_rect);
+            snapshot.pop ();
+            var hb = rgba (1.0f, 1.0f, 1.0f, 0.95f);
+            snapshot.append_border (handle_rounded, { 2.0f, 2.0f, 2.0f, 2.0f }, { hb, hb, hb, hb });
         }
 
         private void draw_secondary_webcams (Gtk.Snapshot snapshot, float stage_x, float stage_y, float stage_w, float stage_h) {
-            if (webcam_textures.length <= 1 || is_recording)
+            if (webcam_textures.length <= 1)
                 return;
 
             float tile_w = float.max (100.0f, stage_w * 0.18f);

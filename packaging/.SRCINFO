@@ -1,0 +1,28 @@
+pkgbase = recgo
+	pkgdesc = GPU-accelerated screen, window, and multi-webcam recorder for GNOME
+	pkgver = 0.3.0
+	pkgrel = 1
+	url = https://github.com/Antux912012/RecGo
+	arch = x86_64
+	license = GPL-3.0-or-later
+	makedepends = meson>=0.62
+	makedepends = ninja
+	makedepends = vala>=0.56
+	makedepends = pkgconf
+	makedepends = gcc
+	depends = gtk4>=4.14
+	depends = libadwaita>=1.5
+	depends = glib2>=2.76
+	depends = gstreamer>=1.20
+	depends = gst-plugins-base>=1.20
+	depends = gst-plugins-good>=1.20
+	depends = gst-plugins-bad>=1.20
+	depends = gst-plugin-pipewire
+	depends = hicolor-icon-theme
+	optdepends = gst-plugins-ugly: additional software codecs
+	optdepends = gst-libav: FFmpeg-based GStreamer plugins
+	optdepends = gstreamer-vaapi: legacy VA-API hardware video acceleration
+	source = recgo-0.3.0.tar.gz::https://github.com/Antux912012/RecGo/archive/refs/tags/v0.3.0.tar.gz
+	sha256sums = SKIP
+
+pkgname = recgo

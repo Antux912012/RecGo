@@ -7,6 +7,7 @@ struct _RecGoDeviceManager {
     GMutex lock;
     GPtrArray *cameras;
     GPtrArray *microphones;
+    guint bus_watch_id;
     guint refresh_idle_id;
 };
 
@@ -255,6 +256,10 @@ recgo_device_manager_dispose (GObject *object)
         g_source_remove (self->refresh_idle_id);
         self->refresh_idle_id = 0;
     }
+    if (self->bus_watch_id != 0) {
+        g_source_remove (self->bus_watch_id);
+        self->bus_watch_id = 0;
+    }
     if (self->monitor) {
         gst_device_monitor_stop (self->monitor);
         g_clear_object (&self->monitor);
@@ -299,7 +304,7 @@ recgo_device_manager_init (RecGoDeviceManager *self)
     gst_device_monitor_add_filter (self->monitor, "Audio/Source", NULL);
 
     GstBus *bus = gst_device_monitor_get_bus (self->monitor);
-    gst_bus_add_watch (bus, on_monitor_bus_message, self);
+    self->bus_watch_id = gst_bus_add_watch (bus, on_monitor_bus_message, self);
     gst_object_unref (bus);
 
     gst_device_monitor_start (self->monitor);

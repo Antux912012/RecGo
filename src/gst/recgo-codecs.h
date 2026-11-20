@@ -52,4 +52,8 @@ void recgo_detect_encoder (RecGoVideoCodec codec,
                            gboolean *is_hw_out,
                            gchar **backend_out);
 
+void recgo_detect_software_encoder (RecGoVideoCodec codec,
+                                    gchar **element_out,
+                                    gchar **backend_out);
+
 G_END_DECLS

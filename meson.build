@@ -1,7 +1,7 @@
 project(
   'recgo',
   'c', 'vala',
-  version: '0.2.0',
+  version: '0.3.0',
   license: 'GPL-3.0-or-later',
   meson_version: '>= 0.62.0',
   default_options: [
@@ -40,6 +40,7 @@ config_vala = configure_file(
 c_sources = files(
   'src/gst/recgo-codecs.c',
   'src/gst/recgo-devices.c',
+  'src/gst/recgo-video-fx.c',
   'src/gst/recgo-preview.c',
   'src/gst/recgo-recorder.c',
 )
@@ -86,9 +87,10 @@ test_gst = executable(
     'tests/test-gst.c',
     'src/gst/recgo-codecs.c',
     'src/gst/recgo-devices.c',
+    'src/gst/recgo-video-fx.c',
   ),
   include_directories: include_directories('src/gst'),
-  dependencies: [gio_dep, gst_dep],
+  dependencies: [gio_dep, gst_dep, gst_video_dep, m_dep],
 )
 test('gst-core', test_gst)
 

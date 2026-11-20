@@ -7,6 +7,7 @@ namespace RecGo {
         private Adw.PreferencesGroup mic_group;
         private GLib.GenericArray<Gtk.Widget> cam_rows = new GLib.GenericArray<Gtk.Widget> ();
         private GLib.GenericArray<Gtk.Widget> mic_rows = new GLib.GenericArray<Gtk.Widget> ();
+        private ulong devices_changed_handler_id = 0;
 
         public signal void codec_changed (int codec_index);
         public signal void countdown_changed (uint seconds, uint custom_seconds);
@@ -24,8 +25,15 @@ namespace RecGo {
             build_devices_page ();
             build_encoders_page ();
 
-            device_manager.devices_changed.connect (() => {
+            devices_changed_handler_id = device_manager.devices_changed.connect (() => {
                 populate_device_rows ();
+            });
+
+            closed.connect (() => {
+                if (devices_changed_handler_id != 0) {
+                    device_manager.disconnect (devices_changed_handler_id);
+                    devices_changed_handler_id = 0;
+                }
             });
         }
 
@@ -33,6 +41,59 @@ namespace RecGo {
             var rec_page = new Adw.PreferencesPage ();
             rec_page.set_title ("Recording");
             rec_page.set_icon_name ("media-record-symbolic");
+
+            // Performance & Older Hardware group
+            var perf_group = new Adw.PreferencesGroup ();
+            perf_group.set_title ("Performance & Hardware Reliability");
+            perf_group.set_description ("Tune resolution, frame rate, and CPU/GPU load. Use Older Hardware mode on dual-core laptops to prevent frame drops.");
+
+            string[] perf_options = {
+                "Older Hardware / Power Saver (720p, Low CPU)",
+                "Balanced (Up to 1080p, Recommended)",
+                "High Quality (Native Resolution, High Bitrate)"
+            };
+            var perf_combo = new Adw.ComboRow ();
+            perf_combo.set_title ("Performance Profile");
+            perf_combo.set_subtitle ("Automatically limits scaling threads and preview bandwidth on older CPUs");
+            perf_combo.set_model (new Gtk.StringList (perf_options));
+
+            string saved_perf = settings.get_string ("performance-mode");
+            uint perf_idx = 1;
+            if (saved_perf == "low-power") perf_idx = 0;
+            else if (saved_perf == "quality") perf_idx = 2;
+            perf_combo.set_selected (perf_idx);
+
+            perf_combo.notify["selected"].connect (() => {
+                uint sel = perf_combo.get_selected ();
+                string mode = (sel == 0) ? "low-power" : ((sel == 2) ? "quality" : "balanced");
+                settings.set_string ("performance-mode", mode);
+            });
+            perf_group.add (perf_combo);
+
+            string[] fps_options = {
+                "24 FPS (Low CPU / Older Laptops)",
+                "30 FPS (Balanced)",
+                "60 FPS (Smooth Motion)"
+            };
+            var fps_combo = new Adw.ComboRow ();
+            fps_combo.set_title ("Target Frame Rate");
+            fps_combo.set_subtitle ("Caps capture frame rate to avoid saturating CPU or integrated GPU");
+            fps_combo.set_model (new Gtk.StringList (fps_options));
+
+            uint saved_fps = settings.get_uint ("target-fps");
+            uint fps_idx = 1;
+            if (saved_fps <= 24) fps_idx = 0;
+            else if (saved_fps >= 60) fps_idx = 2;
+            fps_combo.set_selected (fps_idx);
+
+            fps_combo.notify["selected"].connect (() => {
+                uint sel = fps_combo.get_selected ();
+                uint fps = (sel == 0) ? 24 : ((sel == 2) ? 60 : 30);
+                settings.set_uint ("target-fps", fps);
+            });
+            perf_group.add (fps_combo);
+
+            rec_page.add (perf_group);
 
             // Countdown group
             var cd_group = new Adw.PreferencesGroup ();
@@ -100,7 +161,7 @@ namespace RecGo {
             // Encoder selection group
             var enc_group = new Adw.PreferencesGroup ();
             enc_group.set_title ("Video Encoder & Container Format");
-            enc_group.set_description ("Select the video format and hardware-accelerated encoder used for recordings.");
+            enc_group.set_description ("Select the video format and hardware-accelerated encoder. RecGo automatically falls back to CPU if hardware encoding fails.");
 
             var codecs = Gst.get_supported_codecs ();
             string[] titles = new string[codecs.length];
@@ -122,7 +183,7 @@ namespace RecGo {
 
             var gpu_comp_row = new Adw.SwitchRow ();
             gpu_comp_row.set_title ("OpenGL GPU Compositor");
-            gpu_comp_row.set_subtitle ("Composite multi-camera and screen layers on GPU via glvideomixer");
+            gpu_comp_row.set_subtitle ("Composite multi-camera and screen layers on GPU (auto-falls back to CPU if unavailable)");
             settings.bind ("gpu-compositing", gpu_comp_row, "active", GLib.SettingsBindFlags.DEFAULT);
             enc_group.add (gpu_comp_row);
 
@@ -148,7 +209,7 @@ namespace RecGo {
             add_backend_row (gpu_group,
                 "OpenGL / GLSL Shader Compositor",
                 Gst.has_gst_element ("glupload") && Gst.has_gst_element ("glvideomixer"),
-                "glupload / glcolorconvert / glvideomixer / glshader");
+                "glupload / glcolorconvert / glvideomixer");
 
             rec_page.add (gpu_group);
             add (rec_page);
@@ -258,7 +319,6 @@ namespace RecGo {
             var list = new GLib.GenericArray<string> ();
 
             if (current.length == 0 && all_devices.length > 0) {
-                // Materialize implicit default (index 0) before toggling
                 for (uint i = 0; i < all_devices.length; i++) {
                     unowned var dev = all_devices.get (i);
                     bool def = (key == "enabled-microphones") ? (dev.is_default || i == 0) : (i == 0);

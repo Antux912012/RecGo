@@ -30,6 +30,16 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.3.0" date="2026-11-20">
+      <description>
+        <p>Release v0.3.0 fixes webcam mask compositing in recordings, adds live webcam image enhancements, and optimizes reliability on older hardware:</p>
+        <ul>
+          <li>Masked Webcam Recording: Bakes Circle, Rounded Square, and Rounded Rectangle SDF masks, borders, and drop shadows directly into recorded video across both GPU and CPU compositors.</li>
+          <li>Webcam Image FX: Adds live Mirror, Auto Low-Light Enhance, Digital Zoom, Brightness, Contrast, Exposure/Gamma, Warmth, Saturation, Sharpness, Temporal Noise Reduction, and quick presets.</li>
+          <li>Older Hardware Reliability: Adds Performance Profiles (Older Hardware 720p, Balanced, High Quality), Target FPS capping, fragmented crash-safe MP4 output, and automatic GPU-to-CPU fallback.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.0" date="2026-11-16">
       <description>
         <p>Release v0.2.0 migrates RecGo to native Vala, C, and Meson optimized for GNOME 51:</p>

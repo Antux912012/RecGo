@@ -2,6 +2,17 @@
 
 All notable changes to **RecGo** are documented in this file.
 
+## [0.3.0] - 2026-11-20
+
+### Added
+- **Masked Webcam Recording (`recgo-video-fx.c`)**: Antialiased SDF masks for Circle, Rounded Square, and Rounded Rectangle shapes—along with configurable white borders and drop shadows—are now baked directly into the recorded video stream on both GPU (`glvideomixer`) and CPU (`compositor`) pipelines.
+- **Webcam Image FX Suite**: Added a live Image FX popover with quick presets (*Natural*, *Low-Light Boost*, *Studio Warm*, *Crisp & Vivid*, *Black & White*), *Horizontal Mirror*, *Auto Low-Light Enhance*, *Digital Zoom*, *Brightness*, *Contrast*, *Exposure / Gamma*, *Color Warmth*, *Saturation*, *Sharpness*, and *Edge-Preserving Temporal Noise Reduction*—applied identically to live preview and recordings.
+- **Older Hardware Performance Profiles**: Added *Performance Profile* (*Older Hardware / Power Saver 720p*, *Balanced*, *High Quality*) and *Target Frame Rate* (`24` / `30` / `60` FPS) in Preferences, plus AUR `PKGBUILD` / `.SRCINFO` packaging.
+
+### Fixed & Optimized
+- **Automatic GPU-to-CPU Fallback**: Recording automatically falls back from `glvideomixer` or hardware VA-API/Vulkan encoders to CPU `compositor` / software encoding (`x264enc`, `openh264enc`, `vp8enc`) if driver initialization fails.
+- **Crash-Safe MP4 & Lower CPU Overhead**: Switched MP4 muxing to fragmented MP4 (`fragment-duration=1000`), capped preview bandwidth (`480x270@15fps` to `960x540@24fps`), eliminated double frame copies in `RecGoPreviewFeed`, and fixed `RecGoDeviceManager`, `PreferencesDialog`, and `PreviewWidget` lifecycle/UI bugs.
+
 ## [0.2.0] - 2026-11-16
 
 ### Added

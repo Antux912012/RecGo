@@ -1,0 +1,49 @@
+# Maintainer: Antonio De Gaetano <antux912012@users.noreply.github.com>
+pkgname=recgo
+pkgver=0.3.0
+pkgrel=1
+pkgdesc="GPU-accelerated screen, window, and multi-webcam recorder for GNOME"
+arch=('x86_64')
+url="https://github.com/Antux912012/RecGo"
+license=('GPL-3.0-or-later')
+depends=(
+    'gtk4>=4.14'
+    'libadwaita>=1.5'
+    'glib2>=2.76'
+    'gstreamer>=1.20'
+    'gst-plugins-base>=1.20'
+    'gst-plugins-good>=1.20'
+    'gst-plugins-bad>=1.20'
+    'gst-plugin-pipewire'
+    'hicolor-icon-theme'
+)
+optdepends=(
+    'gst-plugins-ugly: additional software codecs'
+    'gst-libav: FFmpeg-based GStreamer plugins'
+    'gstreamer-vaapi: legacy VA-API hardware video acceleration'
+)
+makedepends=(
+    'meson>=0.62'
+    'ninja'
+    'vala>=0.56'
+    'pkgconf'
+    'gcc'
+)
+source=("$pkgname-$pkgver.tar.gz::https://github.com/Antux912012/RecGo/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+    cd "$srcdir/RecGo-$pkgver"
+    arch-meson build
+    meson compile -C build
+}
+
+check() {
+    cd "$srcdir/RecGo-$pkgver"
+    meson test -C build --print-errorlogs
+}
+
+package() {
+    cd "$srcdir/RecGo-$pkgver"
+    DESTDIR="$pkgdir" meson install -C build
+}

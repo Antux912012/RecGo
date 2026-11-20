@@ -56,6 +56,76 @@
       <summary>GPU compositing</summary>
       <description>Prefer GStreamer OpenGL compositor (glvideomixer) when available.</description>
     </key>
+    <key name="target-fps" type="u">
+      <default>30</default>
+      <summary>Target frame rate</summary>
+      <description>Maximum capture and recording frame rate (24, 30, or 60 FPS).</description>
+    </key>
+    <key name="performance-mode" type="s">
+      <default>'balanced'</default>
+      <summary>Performance profile</summary>
+      <description>Hardware resource profile: low-power (older hardware / 720p), balanced, or quality.</description>
+    </key>
+    <key name="webcam-mirror" type="b">
+      <default>false</default>
+      <summary>Mirror webcam horizontally</summary>
+      <description>Flip webcam video horizontally like a mirror.</description>
+    </key>
+    <key name="webcam-auto-enhance" type="b">
+      <default>false</default>
+      <summary>Auto low-light enhancement</summary>
+      <description>Automatically balance exposure and white balance for dim environments.</description>
+    </key>
+    <key name="webcam-brightness" type="d">
+      <default>0.0</default>
+      <summary>Webcam brightness</summary>
+      <description>Brightness offset (-0.5 to 0.5).</description>
+    </key>
+    <key name="webcam-contrast" type="d">
+      <default>1.0</default>
+      <summary>Webcam contrast</summary>
+      <description>Contrast multiplier (0.5 to 2.0).</description>
+    </key>
+    <key name="webcam-saturation" type="d">
+      <default>1.0</default>
+      <summary>Webcam saturation</summary>
+      <description>Color saturation multiplier (0.0 to 2.0).</description>
+    </key>
+    <key name="webcam-warmth" type="d">
+      <default>0.0</default>
+      <summary>Webcam color warmth</summary>
+      <description>Color temperature shift from cool (-1.0) to warm (+1.0).</description>
+    </key>
+    <key name="webcam-gamma" type="d">
+      <default>1.0</default>
+      <summary>Webcam exposure / gamma</summary>
+      <description>Midtone exposure lift / gamma curve (0.5 to 2.0).</description>
+    </key>
+    <key name="webcam-sharpness" type="d">
+      <default>0.0</default>
+      <summary>Webcam sharpness</summary>
+      <description>Unsharp mask sharpening amount (0.0 to 1.0).</description>
+    </key>
+    <key name="webcam-denoise" type="d">
+      <default>0.0</default>
+      <summary>Webcam noise reduction</summary>
+      <description>Temporal noise reduction strength for grainy low-light webcams (0.0 to 1.0).</description>
+    </key>
+    <key name="webcam-zoom" type="d">
+      <default>1.0</default>
+      <summary>Webcam digital zoom</summary>
+      <description>Center digital zoom multiplier (1.0 to 2.5).</description>
+    </key>
+    <key name="webcam-border" type="b">
+      <default>true</default>
+      <summary>Webcam mask border</summary>
+      <description>Draw a crisp white border around the webcam overlay mask.</description>
+    </key>
+    <key name="webcam-shadow" type="b">
+      <default>true</default>
+      <summary>Webcam mask drop shadow</summary>
+      <description>Draw a soft drop shadow behind the webcam overlay mask.</description>
+    </key>
     <key name="enabled-cameras" type="as">
       <default>[]</default>
       <summary>Enabled camera IDs</summary>

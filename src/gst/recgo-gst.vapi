@@ -80,14 +80,41 @@ namespace RecGo.Gst {
         public signal void devices_changed ();
     }
 
+    [CCode (cname = "RecGoWebcamShape", cprefix = "RECGO_SHAPE_", has_type_id = false, cheader_filename = "recgo-video-fx.h")]
+    public enum WebcamShape {
+        RECTANGLE,
+        SQUARE,
+        CIRCLE
+    }
+
+    [CCode (cname = "RecGoWebcamImageConfig", has_type_id = false, cheader_filename = "recgo-video-fx.h")]
+    public struct WebcamImageConfig {
+        public bool mirror;
+        public bool auto_enhance;
+        public double brightness;
+        public double contrast;
+        public double saturation;
+        public double warmth;
+        public double gamma;
+        public double sharpness;
+        public double denoise;
+        public double zoom;
+        public bool border_enabled;
+        public bool shadow_enabled;
+    }
+
+    [CCode (cname = "recgo_webcam_image_config_init_defaults", cheader_filename = "recgo-video-fx.h")]
+    public void webcam_image_config_init_defaults (out WebcamImageConfig cfg);
+
     [CCode (cname = "RecGoPreviewFeed", cheader_filename = "recgo-preview.h")]
     public class PreviewFeed : GLib.Object {
         [CCode (cname = "recgo_preview_feed_new_camera")]
-        public static PreviewFeed? new_camera (DeviceInfo device) throws GLib.Error;
+        public static PreviewFeed? new_camera (DeviceInfo device, WebcamImageConfig? image_cfg = null) throws GLib.Error;
 
         [CCode (cname = "recgo_preview_feed_new_screen")]
         public static PreviewFeed? new_screen (int pw_fd, uint32 node_id) throws GLib.Error;
 
+        public void update_image_config (WebcamImageConfig image_cfg);
         public void stop ();
         public unowned string? get_device_id ();
         public signal void frame_ready (Gdk.Texture texture);
@@ -101,11 +128,11 @@ namespace RecGo.Gst {
         CAMERA_ONLY
     }
 
-    [CCode (cname = "RecGoWebcamShape", cprefix = "RECGO_SHAPE_", has_type_id = false, cheader_filename = "recgo-recorder.h")]
-    public enum WebcamShape {
-        RECTANGLE,
-        SQUARE,
-        CIRCLE
+    [CCode (cname = "RecGoPerformanceMode", cprefix = "RECGO_PERF_", has_type_id = false, cheader_filename = "recgo-recorder.h")]
+    public enum PerformanceMode {
+        LOW_POWER,
+        BALANCED,
+        QUALITY
     }
 
     [CCode (cname = "RecGoRecordConfig", has_type_id = false, cheader_filename = "recgo-recorder.h")]
@@ -122,9 +149,12 @@ namespace RecGo.Gst {
         public double overlay_x;
         public double overlay_y;
         public double overlay_scale;
+        public WebcamImageConfig image_config;
         public VideoCodec codec;
         public ContainerFormat container;
         public bool prefer_gpu_compositing;
+        public uint target_fps;
+        public PerformanceMode performance_mode;
         public unowned string output_path;
     }
 
@@ -137,6 +167,7 @@ namespace RecGo.Gst {
         public bool pause () throws GLib.Error;
         public bool resume () throws GLib.Error;
         public void stop_async ();
+        public void update_image_config (WebcamImageConfig image_cfg);
 
         public unowned string get_encoder_description ();
         public unowned PreviewFeed? get_preview_feed ();
