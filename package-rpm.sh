@@ -4,7 +4,7 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VERSION="0.3.0"
+VERSION="0.3.1"
 CONTAINER_IMAGE="${RECGO_CONTAINER:-localhost/recgo-builder:latest}"
 
 if ! podman image exists "${CONTAINER_IMAGE}" 2>/dev/null; then

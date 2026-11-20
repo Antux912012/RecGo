@@ -4,7 +4,7 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VERSION="0.3.0"
+VERSION="0.3.1"
 DEB_NAME="recgo_${VERSION}-1_amd64.deb"
 STAGE_DIR="${PROJECT_DIR}/deb-staging"
 IMAGE="${RECGO_DEB_CONTAINER:-docker.io/library/debian:sid}"

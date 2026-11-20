@@ -1,7 +1,7 @@
 project(
   'recgo',
   'c', 'vala',
-  version: '0.3.0',
+  version: '0.3.1',
   license: 'GPL-3.0-or-later',
   meson_version: '>= 0.62.0',
   default_options: [
@@ -48,6 +48,7 @@ c_sources = files(
 vala_sources = files(
   'src/main.vala',
   'src/application.vala',
+  'src/safe-settings.vala',
   'src/window.vala',
   'src/preview-widget.vala',
   'src/preferences-dialog.vala',

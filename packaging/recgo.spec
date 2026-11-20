@@ -1,5 +1,5 @@
 Name:           recgo
-Version:        0.3.0
+Version:        0.3.1
 Release:        1%{?dist}
 Summary:        GPU-accelerated screen, window, and multi-webcam recorder for GNOME 51
 
@@ -53,6 +53,9 @@ and GNOME Shell integration.
 %{_datadir}/icons/hicolor/*/apps/io.github.Antux912012.RecGo.*
 
 %changelog
+* Fri Nov 20 2026 Antonio De Gaetano <antux912012@users.noreply.github.com> - 0.3.1-1
+- Add SafeSettings fallback wrapper so missing keys in outdated GSettings schemas (such as Flatpak wrapper schemas) no longer abort startup
+
 * Fri Nov 20 2026 Antonio De Gaetano <antux912012@users.noreply.github.com> - 0.3.0-1
 - Bake webcam SDF shape masks (Circle, Square, Rectangle), borders, and drop shadows into recordings
 - Add live Image FX controls (Mirror, Auto Low-Light Enhance, Zoom, Brightness, Contrast, Gamma, Warmth, Saturation, Sharpness, Temporal Denoise)

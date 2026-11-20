@@ -30,6 +30,14 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.3.1" date="2026-11-20">
+      <description>
+        <p>Release v0.3.1 fixes Flatpak startup crashes when an outdated GSettings schema is present:</p>
+        <ul>
+          <li>Safe GSettings Fallback: Wraps GLib.Settings reads, writes, and bindings with schema key checks and in-memory fallback defaults so outdated Flatpak wrapper schemas (missing keys like webcam-border) never trigger a fatal GLib-GIO-ERROR on launch.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.3.0" date="2026-11-20">
       <description>
         <p>Release v0.3.0 fixes webcam mask compositing in recordings, adds live webcam image enhancements, and optimizes reliability on older hardware:</p>

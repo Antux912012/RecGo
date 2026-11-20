@@ -2,6 +2,11 @@
 
 All notable changes to **RecGo** are documented in this file.
 
+## [0.3.1] - 2026-11-20
+
+### Fixed
+- **Flatpak Startup Crash (`SafeSettings`)**: Added `SafeSettings` (`src/safe-settings.vala`) wrapping `GLib.Settings` with `SettingsSchema.has_key()` checks and in-memory fallback defaults, preventing fatal `GLib-GIO-ERROR` aborts (`Settings schema 'io.github.Antux912012.RecGo' does not contain a key named 'webcam-border'`) when launched with an outdated Flatpak wrapper schema.
+
 ## [0.3.0] - 2026-11-20
 
 ### Added

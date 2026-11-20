@@ -1,7 +1,7 @@
 namespace RecGo {
 
     public class Window : Adw.ApplicationWindow {
-        private GLib.Settings settings;
+        private SafeSettings settings;
         private Gst.DeviceManager device_manager;
         private PreviewWidget preview;
         private Adw.ToastOverlay toast_overlay;
@@ -83,7 +83,7 @@ namespace RecGo {
         }
 
         construct {
-            settings = new GLib.Settings (Config.APP_ID);
+            settings = new SafeSettings (Config.APP_ID);
             device_manager = new Gst.DeviceManager ();
             Gst.detect_gpu_acceleration (out gpu_summary);
             supported_codecs = Gst.get_supported_codecs ();
@@ -132,7 +132,7 @@ namespace RecGo {
         }
 
         private int find_saved_codec_index () {
-            string saved_id = settings.get_string ("video-codec");
+            string saved_id = settings.get_string ("video-codec", "h264");
             for (uint i = 0; i < supported_codecs.length; i++) {
                 if (supported_codecs.get (i).id == saved_id) {
                     return (int) i;
@@ -454,18 +454,18 @@ namespace RecGo {
         private Gst.WebcamImageConfig current_image_config () {
             Gst.WebcamImageConfig cfg;
             Gst.webcam_image_config_init_defaults (out cfg);
-            cfg.mirror = settings.get_boolean ("webcam-mirror");
-            cfg.auto_enhance = settings.get_boolean ("webcam-auto-enhance");
-            cfg.brightness = settings.get_double ("webcam-brightness");
-            cfg.contrast = settings.get_double ("webcam-contrast");
-            cfg.saturation = settings.get_double ("webcam-saturation");
-            cfg.warmth = settings.get_double ("webcam-warmth");
-            cfg.gamma = settings.get_double ("webcam-gamma");
-            cfg.sharpness = settings.get_double ("webcam-sharpness");
-            cfg.denoise = settings.get_double ("webcam-denoise");
-            cfg.zoom = settings.get_double ("webcam-zoom");
-            cfg.border_enabled = settings.get_boolean ("webcam-border");
-            cfg.shadow_enabled = settings.get_boolean ("webcam-shadow");
+            cfg.mirror = settings.get_boolean ("webcam-mirror", false);
+            cfg.auto_enhance = settings.get_boolean ("webcam-auto-enhance", false);
+            cfg.brightness = settings.get_double ("webcam-brightness", 0.0);
+            cfg.contrast = settings.get_double ("webcam-contrast", 1.0);
+            cfg.saturation = settings.get_double ("webcam-saturation", 1.0);
+            cfg.warmth = settings.get_double ("webcam-warmth", 0.0);
+            cfg.gamma = settings.get_double ("webcam-gamma", 1.0);
+            cfg.sharpness = settings.get_double ("webcam-sharpness", 0.0);
+            cfg.denoise = settings.get_double ("webcam-denoise", 0.0);
+            cfg.zoom = settings.get_double ("webcam-zoom", 1.0);
+            cfg.border_enabled = settings.get_boolean ("webcam-border", true);
+            cfg.shadow_enabled = settings.get_boolean ("webcam-shadow", true);
             return cfg;
         }
 
@@ -627,7 +627,7 @@ namespace RecGo {
         }
 
         private void load_settings_into_ui () {
-            string layout_str = settings.get_string ("layout-preset");
+            string layout_str = settings.get_string ("layout-preset", "desktop-pip");
             uint layout_idx = 0;
             if (layout_str == "side-by-side") layout_idx = 1;
             else if (layout_str == "screen-only") layout_idx = 2;
@@ -635,45 +635,45 @@ namespace RecGo {
             layout_dropdown.set_selected (layout_idx);
             preview.layout = (Gst.LayoutPreset) layout_idx;
 
-            string shape_str = settings.get_string ("webcam-shape");
+            string shape_str = settings.get_string ("webcam-shape", "circle");
             uint shape_idx = 0;
             if (shape_str == "square") shape_idx = 1;
             else if (shape_str == "rectangle") shape_idx = 2;
             shape_dropdown.set_selected (shape_idx);
             preview.shape = shape_from_index (shape_idx);
 
-            bool border_on = settings.get_boolean ("webcam-border");
-            bool shadow_on = settings.get_boolean ("webcam-shadow");
+            bool border_on = settings.get_boolean ("webcam-border", true);
+            bool shadow_on = settings.get_boolean ("webcam-shadow", true);
             border_switch.set_active (border_on);
             shadow_switch.set_active (shadow_on);
             preview.border_enabled = border_on;
             preview.shadow_enabled = shadow_on;
 
-            preview.overlay_x = settings.get_double ("webcam-pos-x");
-            preview.overlay_y = settings.get_double ("webcam-pos-y");
-            double sc = settings.get_double ("webcam-scale").clamp (0.10, 0.65);
+            preview.overlay_x = settings.get_double ("webcam-pos-x", 0.76);
+            preview.overlay_y = settings.get_double ("webcam-pos-y", 0.68);
+            double sc = settings.get_double ("webcam-scale", 0.24).clamp (0.10, 0.65);
             preview.overlay_scale = sc;
             guard_scale = true;
             size_scale.set_value (sc);
             guard_scale = false;
 
             guard_fx_ui = true;
-            fx_mirror_switch.set_active (settings.get_boolean ("webcam-mirror"));
-            fx_auto_switch.set_active (settings.get_boolean ("webcam-auto-enhance"));
-            fx_zoom_scale.set_value (settings.get_double ("webcam-zoom").clamp (1.0, 2.5));
-            fx_brightness_scale.set_value (settings.get_double ("webcam-brightness").clamp (-0.5, 0.5));
-            fx_contrast_scale.set_value (settings.get_double ("webcam-contrast").clamp (0.5, 2.0));
-            fx_gamma_scale.set_value (settings.get_double ("webcam-gamma").clamp (0.5, 2.0));
-            fx_warmth_scale.set_value (settings.get_double ("webcam-warmth").clamp (-1.0, 1.0));
-            fx_saturation_scale.set_value (settings.get_double ("webcam-saturation").clamp (0.0, 2.0));
-            fx_sharpness_scale.set_value (settings.get_double ("webcam-sharpness").clamp (0.0, 1.0));
-            fx_denoise_scale.set_value (settings.get_double ("webcam-denoise").clamp (0.0, 1.0));
+            fx_mirror_switch.set_active (settings.get_boolean ("webcam-mirror", false));
+            fx_auto_switch.set_active (settings.get_boolean ("webcam-auto-enhance", false));
+            fx_zoom_scale.set_value (settings.get_double ("webcam-zoom", 1.0).clamp (1.0, 2.5));
+            fx_brightness_scale.set_value (settings.get_double ("webcam-brightness", 0.0).clamp (-0.5, 0.5));
+            fx_contrast_scale.set_value (settings.get_double ("webcam-contrast", 1.0).clamp (0.5, 2.0));
+            fx_gamma_scale.set_value (settings.get_double ("webcam-gamma", 1.0).clamp (0.5, 2.0));
+            fx_warmth_scale.set_value (settings.get_double ("webcam-warmth", 0.0).clamp (-1.0, 1.0));
+            fx_saturation_scale.set_value (settings.get_double ("webcam-saturation", 1.0).clamp (0.0, 2.0));
+            fx_sharpness_scale.set_value (settings.get_double ("webcam-sharpness", 0.0).clamp (0.0, 1.0));
+            fx_denoise_scale.set_value (settings.get_double ("webcam-denoise", 0.0).clamp (0.0, 1.0));
             fx_preset_dropdown.set_selected (0);
             update_fx_value_labels ();
             guard_fx_ui = false;
 
-            mic_toggle.set_active (settings.get_boolean ("mic-enabled"));
-            sync_countdown_dropdown (settings.get_uint ("countdown-seconds"));
+            mic_toggle.set_active (settings.get_boolean ("mic-enabled", true));
+            sync_countdown_dropdown (settings.get_uint ("countdown-seconds", 3));
         }
 
         private static Gst.WebcamShape shape_from_index (uint idx) {
@@ -843,7 +843,7 @@ namespace RecGo {
             grp.set_description ("Set duration up to 5 minutes (300 seconds)");
             var spin = new Adw.SpinRow.with_range (1.0, 300.0, 1.0);
             spin.set_title ("Duration (seconds)");
-            spin.set_value ((double) settings.get_uint ("custom-countdown-seconds").clamp (1, 300));
+            spin.set_value ((double) settings.get_uint ("custom-countdown-seconds", 15).clamp (1, 300));
             grp.add (spin);
             page.add (grp);
             dialog.add (page);
@@ -1002,7 +1002,7 @@ namespace RecGo {
                 return;
             }
 
-            uint cd = settings.get_uint ("countdown-seconds");
+            uint cd = settings.get_uint ("countdown-seconds", 3);
             if (cd == 0) {
                 launch_recording.begin ();
                 return;
@@ -1097,9 +1097,9 @@ namespace RecGo {
             cfg.image_config = current_image_config ();
             cfg.codec = codec;
             cfg.container = container;
-            cfg.prefer_gpu_compositing = settings.get_boolean ("gpu-compositing");
-            cfg.target_fps = settings.get_uint ("target-fps");
-            cfg.performance_mode = perf_mode_from_string (settings.get_string ("performance-mode"));
+            cfg.prefer_gpu_compositing = settings.get_boolean ("gpu-compositing", true);
+            cfg.target_fps = settings.get_uint ("target-fps", 30);
+            cfg.performance_mode = perf_mode_from_string (settings.get_string ("performance-mode", "balanced"));
             cfg.output_path = out_path;
 
             try {

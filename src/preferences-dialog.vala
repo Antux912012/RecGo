@@ -1,7 +1,7 @@
 namespace RecGo {
 
     public class PreferencesDialog : Adw.PreferencesDialog {
-        private GLib.Settings settings;
+        private SafeSettings settings;
         private Gst.DeviceManager device_manager;
         private Adw.PreferencesGroup cam_group;
         private Adw.PreferencesGroup mic_group;
@@ -13,7 +13,7 @@ namespace RecGo {
         public signal void countdown_changed (uint seconds, uint custom_seconds);
         public signal void devices_selection_changed ();
 
-        public PreferencesDialog (GLib.Settings settings,
+        public PreferencesDialog (SafeSettings settings,
                                   Gst.DeviceManager device_manager,
                                   int current_codec_idx) {
             this.settings = settings;
@@ -57,7 +57,7 @@ namespace RecGo {
             perf_combo.set_subtitle ("Automatically limits scaling threads and preview bandwidth on older CPUs");
             perf_combo.set_model (new Gtk.StringList (perf_options));
 
-            string saved_perf = settings.get_string ("performance-mode");
+            string saved_perf = settings.get_string ("performance-mode", "balanced");
             uint perf_idx = 1;
             if (saved_perf == "low-power") perf_idx = 0;
             else if (saved_perf == "quality") perf_idx = 2;
@@ -80,7 +80,7 @@ namespace RecGo {
             fps_combo.set_subtitle ("Caps capture frame rate to avoid saturating CPU or integrated GPU");
             fps_combo.set_model (new Gtk.StringList (fps_options));
 
-            uint saved_fps = settings.get_uint ("target-fps");
+            uint saved_fps = settings.get_uint ("target-fps", 30);
             uint fps_idx = 1;
             if (saved_fps <= 24) fps_idx = 0;
             else if (saved_fps >= 60) fps_idx = 2;
@@ -113,8 +113,8 @@ namespace RecGo {
             cd_combo.set_subtitle ("Time delay after pressing Record");
             cd_combo.set_model (cd_list);
 
-            uint cd_secs = settings.get_uint ("countdown-seconds");
-            uint custom_secs = settings.get_uint ("custom-countdown-seconds");
+            uint cd_secs = settings.get_uint ("countdown-seconds", 3);
+            uint custom_secs = settings.get_uint ("custom-countdown-seconds", 15);
 
             uint initial_idx;
             switch (cd_secs) {
@@ -184,7 +184,7 @@ namespace RecGo {
             var gpu_comp_row = new Adw.SwitchRow ();
             gpu_comp_row.set_title ("OpenGL GPU Compositor");
             gpu_comp_row.set_subtitle ("Composite multi-camera and screen layers on GPU (auto-falls back to CPU if unavailable)");
-            settings.bind ("gpu-compositing", gpu_comp_row, "active", GLib.SettingsBindFlags.DEFAULT);
+            settings.bind_boolean ("gpu-compositing", gpu_comp_row, "active", GLib.SettingsBindFlags.DEFAULT, true);
             enc_group.add (gpu_comp_row);
 
             rec_page.add (enc_group);
