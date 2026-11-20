@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Antux912012/RecGo/releases"><img src="https://img.shields.io/badge/version-0.2.0-blue.svg" alt="Version 0.2.0"></a>
+  <a href="https://github.com/Antux912012/RecGo/releases"><img src="https://img.shields.io/badge/version-0.3.1-blue.svg" alt="Version 0.3.1"></a>
   <a href="https://www.gnu.org/licenses/gpl-3.0"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg" alt="GPL-3.0 License"></a>
   <a href="https://www.gtk.org/"><img src="https://img.shields.io/badge/GTK-4.22-orange.svg" alt="GTK4"></a>
   <a href="https://gnome.pages.gitlab.gnome.org/libadwaita/"><img src="https://img.shields.io/badge/Libadwaita-1.9-purple.svg" alt="Libadwaita"></a>
@@ -55,10 +55,15 @@
   - **AV1 (MKV):** Next-generation AV1 video encoding via VA-API / Vulkan.
 - **Real-Time Hardware Diagnostics:** Built-in hardware engine verification for VA-API, Vulkan Compute, and OpenGL compositors.
 
-### 🎥 Draggable & Resizable Webcam Overlay
+### 🎥 Draggable, Resizable & Masked Webcam Overlay
 - **Direct Interactive Manipulation:** Freely drag the camera feed anywhere on the preview canvas.
 - **Flexible Sizing:** Resize through the blue corner handle, mouse scroll wheel, or the bottom-bar slider.
-- **Geometric Enclosure Shapes:** Choose between **Circle**, **Square**, and **Rectangle** webcam frames with dynamic drop shadows.
+- **Baked Geometric Enclosure Masks (`recgo-video-fx.c`):** Choose between **Circle**, **Rounded Square**, and **Rounded Rectangle** frames with configurable white borders and drop shadows—composited identically in both live preview and recorded video on GPU (`glvideomixer`) and CPU (`compositor`) pipelines.
+- **Webcam Image FX Suite:** Live presets (*Natural*, *Low-Light Boost*, *Studio Warm*, *Crisp & Vivid*, *Black & White*), horizontal mirror, auto low-light enhance, digital zoom, brightness, contrast, gamma/exposure, color warmth, saturation, sharpness, and temporal noise reduction.
+
+### 🔋 Older Hardware Reliability & Sandboxed Settings
+- **Performance Profiles:** Choose *Older Hardware / Power Saver (720p)*, *Balanced*, or *High Quality* with selectable `24` / `30` / `60` FPS targets and automatic GPU-to-CPU encoder fallback.
+- **Flatpak Schema Resilience (`SafeSettings`):** Graceful fallback to default schema values when launched inside Flatpak sandboxes with older compiled GSettings schemas.
 
 ### 📐 Layout Presets
 - **Desktop + Webcam PiP:** Picture-in-picture recording with customizable webcam position and scale.
@@ -80,17 +85,19 @@
 
 ## Installation & Packaging
 
-### Standalone Flatpak (Recommended)
+### Standalone Flatpak, Debian, Fedora RPM & AUR
 
-RecGo is packaged as a standalone Flatpak bundle:
+RecGo is distributed via [GitHub Releases](https://github.com/Antux912012/RecGo/releases) and **FlatPark** as `.flatpak`, `.deb`, `.rpm`, and AUR `PKGBUILD`:
 
 ```bash
 # Install the Flatpak bundle locally
-flatpak install --user --reinstall RecGo.flatpak
+flatpak install --user --reinstall RecGo-0.3.1-x86_64.flatpak
 
 # Run RecGo
 flatpak run io.github.Antux912012.RecGo
 ```
+
+See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 
 ---
 
