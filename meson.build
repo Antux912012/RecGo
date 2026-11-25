@@ -1,7 +1,7 @@
 project(
   'recgo',
   'c', 'vala',
-  version: '0.3.1',
+  version: '0.3.2',
   license: 'GPL-3.0-or-later',
   meson_version: '>= 0.62.0',
   default_options: [

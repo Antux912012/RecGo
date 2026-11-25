@@ -30,6 +30,19 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.3.2" date="2026-11-25">
+      <description>
+        <p>Release v0.3.2 introduces Multi-Screen recording, improved Cam + Window capture, Multi-Microphone live mute, a simplified Kdenlive-inspired Edit Mode, and a refreshed vector icon:</p>
+        <ul>
+          <li>Multi-Screen Recording: Select multiple monitors or displays at once via the Wayland ScreenCast portal and composite them automatically with live multi-display preview.</li>
+          <li>Cam + Window App Recording: Aspect-ratio preserving window capture with dynamic resize handling on both OpenGL and CPU compositors, plus automatic source refresh when switching between Monitor and Window.</li>
+          <li>Multi-Microphone Mixer &amp; Live Mute: Synchronized 48 kHz multi-mic mixing with live mute/unmute during active recordings and reliable device deselection in Preferences.</li>
+          <li>Simplified In-App Edit Mode: Switch to Edit mode (or click Edit on the recording-saved toast) to browse clips in the Project Bin, scrub the V1/A1 timeline, set In/Out trim points, mark splits, and export trimmed videos.</li>
+          <li>Refreshed Vector Icon &amp; Complete Papirus Fallback: Updated application icon across all resolutions and bundled all symbolic UI icons in GResource for consistent rendering on any GNOME theme.</li>
+          <li>Libadwaita UI Polish &amp; Memory Safety: Streamlined action bar buttons, removed duplicate preferences controls, and hardened GStreamer pad-probe reference counting.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.3.1" date="2026-11-20">
       <description>
         <p>Release v0.3.1 fixes Flatpak startup crashes when an outdated GSettings schema is present:</p>

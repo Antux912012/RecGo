@@ -1,5 +1,5 @@
 Name:           recgo
-Version:        0.3.1
+Version:        0.3.2
 Release:        1%{?dist}
 Summary:        GPU-accelerated screen, window, and multi-webcam recorder for GNOME 51
 

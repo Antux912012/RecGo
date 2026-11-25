@@ -2,6 +2,18 @@
 
 All notable changes to **RecGo** are documented in this file.
 
+## [0.3.2] - 2026-11-25
+
+### Added
+- **Multi-Screen Recording (`portal.vala`, `recgo-recorder.c`, `preview-widget.vala`)**: Enabled `multiple: true` in XDG Desktop Portal ScreenCast sessions (`CaptureSession`), tiling multiple selected monitors/displays in `glvideomixer` / `compositor` and rendering a live multi-display preview grid.
+- **Cam + Window App Recording Improvements**: Invalidate stale screen sessions when switching between Monitor and Application Window capture, preserve window aspect ratios with `videoscale add-borders=true` and `draw_texture_contain()`, and attach a `GST_EVENT_CAPS` probe on the OpenGL path for dynamic window resizes.
+- **Simplified In-App Edit Mode (Kdenlive-Inspired)**: Added `RecGoEditor` (`src/gst/recgo-editor.c`), `TimelineWidget` (`src/timeline-widget.vala`), and `EditorView` (`src/editor-view.vala`) with a Project Bin, `Gtk.MediaFile` preview monitor and transport, V1/A1 timeline with playhead scrubbing, In/Out trim handles, razor split markers, and hardware/software trimmed export.
+- **New Vector Application Icon & Complete Papirus Theme Bundle**: Replaced `io.github.Antux912012.RecGo.svg` and all PNG resolutions (`32x32` through `512x512`), and bundled `list-add-symbolic.svg` and `media-playback-start-symbolic.svg` in GResource.
+
+### Fixed & Cleaned Up
+- **Multi-Microphone Mixing & Live Mute**: Standardized `audiomixer` (`48 kHz` F32LE, `audiorate`, `volume` per mic) with live `recgo_recorder_set_mic_muted()` wired to the header microphone toggle, and fixed unchecking the last mic/camera in Preferences (`"none"` sentinel).
+- **UI & Codebase Cleanup**: Removed leftover Rust v0.1.x files, simplified `data/style.css` to use native Libadwaita `.pill` buttons, removed duplicated Countdown/Encoders Preferences UI, refactored `append_pre_encode` into a table (adding `svtav1enc`), and ref-counted `comp` inside `ScreenSlotProbeData`.
+
 ## [0.3.1] - 2026-11-20
 
 ### Fixed
