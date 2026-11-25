@@ -9,6 +9,7 @@ typedef struct {
     guint32 screen_node_id;
     guint screen_width;
     guint screen_height;
+    GPtrArray *screen_streams;
     GPtrArray *cameras;
     GPtrArray *microphones;
     gboolean mic_enabled;
@@ -83,6 +84,51 @@ clone_device_array (GPtrArray *src)
     return arr;
 }
 
+RecGoScreenStream *
+recgo_screen_stream_new (int fd, guint32 node_id, guint width, guint height)
+{
+    RecGoScreenStream *s = g_new0 (RecGoScreenStream, 1);
+    s->fd = (fd >= 0) ? fcntl (fd, F_DUPFD_CLOEXEC, 3) : -1;
+    s->node_id = node_id;
+    s->width = width;
+    s->height = height;
+    return s;
+}
+
+RecGoScreenStream *
+recgo_screen_stream_copy (const RecGoScreenStream *stream)
+{
+    if (!stream)
+        return NULL;
+    return recgo_screen_stream_new (stream->fd, stream->node_id, stream->width, stream->height);
+}
+
+void
+recgo_screen_stream_free (RecGoScreenStream *stream)
+{
+    if (!stream)
+        return;
+    if (stream->fd >= 0) {
+        close (stream->fd);
+        stream->fd = -1;
+    }
+    g_free (stream);
+}
+
+static GPtrArray *
+clone_screen_array (GPtrArray *src)
+{
+    GPtrArray *arr = g_ptr_array_new_with_free_func ((GDestroyNotify) recgo_screen_stream_free);
+    if (!src)
+        return arr;
+    for (guint i = 0; i < src->len; i++) {
+        const RecGoScreenStream *s = g_ptr_array_index (src, i);
+        if (s && s->fd >= 0)
+            g_ptr_array_add (arr, recgo_screen_stream_copy (s));
+    }
+    return arr;
+}
+
 static void
 saved_config_clear (SavedRecordConfig *sc)
 {
@@ -90,6 +136,7 @@ saved_config_clear (SavedRecordConfig *sc)
         close (sc->screen_fd);
         sc->screen_fd = -1;
     }
+    g_clear_pointer (&sc->screen_streams, g_ptr_array_unref);
     g_clear_pointer (&sc->cameras, g_ptr_array_unref);
     g_clear_pointer (&sc->microphones, g_ptr_array_unref);
     g_clear_pointer (&sc->output_path, g_free);
@@ -128,24 +175,82 @@ effective_threads (const SavedRecordConfig *cfg)
 static void
 compute_output_dimensions (const SavedRecordConfig *cfg, guint *out_w, guint *out_h)
 {
-    guint w = MAX (640U, cfg->screen_width ? cfg->screen_width : 1920U);
-    guint h = MAX (360U, cfg->screen_height ? cfg->screen_height : 1080U);
+    guint n_screens = cfg->screen_streams ? cfg->screen_streams->len : 0;
+    guint w = 1920U;
+    guint h = 1080U;
 
-    guint max_w = 0;
-    if (cfg->performance_mode == RECGO_PERF_LOW_POWER)
+    if (n_screens == 1) {
+        const RecGoScreenStream *s0 = g_ptr_array_index (cfg->screen_streams, 0);
+        w = MAX (320U, s0->width ? s0->width : 1920U);
+        h = MAX (240U, s0->height ? s0->height : 1080U);
+    } else if (n_screens >= 2) {
+        w = (cfg->performance_mode == RECGO_PERF_QUALITY) ? 2560U : 1920U;
+        h = (cfg->performance_mode == RECGO_PERF_QUALITY) ? 1440U : 1080U;
+    } else {
+        w = MAX (640U, cfg->screen_width ? cfg->screen_width : 1920U);
+        h = MAX (360U, cfg->screen_height ? cfg->screen_height : 1080U);
+    }
+
+    guint max_w = 0, max_h = 0;
+    if (cfg->performance_mode == RECGO_PERF_LOW_POWER) {
         max_w = 1280U;
-    else if (cfg->performance_mode == RECGO_PERF_BALANCED)
+        max_h = 720U;
+    } else if (cfg->performance_mode == RECGO_PERF_BALANCED) {
         max_w = 1920U;
+        max_h = 1080U;
+    }
 
-    if (max_w > 0 && w > max_w) {
-        gdouble scale = (gdouble) max_w / (gdouble) w;
-        w = max_w;
+    if (max_w > 0 && (w > max_w || h > max_h)) {
+        gdouble scale = MIN ((gdouble) max_w / (gdouble) w, (gdouble) max_h / (gdouble) h);
+        w = (guint) lround ((gdouble) w * scale);
         h = (guint) lround ((gdouble) h * scale);
     }
 
-    *out_w = even_u (MAX (640U, w));
-    *out_h = even_u (MAX (360U, h));
+    *out_w = even_u (MAX (320U, w));
+    *out_h = even_u (MAX (240U, h));
 }
+
+typedef enum {
+    PRE_ENC_VAAPI = 0,
+    PRE_ENC_VAAPI_LEGACY,
+    PRE_ENC_VULKAN,
+    PRE_ENC_NVENC,
+    PRE_ENC_I420_VPX,
+    PRE_ENC_I420_X264,
+    PRE_ENC_I420_OPENH264,
+    PRE_ENC_I420_X265,
+    PRE_ENC_I420_SVTAV1
+} PreEncKind;
+
+typedef struct {
+    const gchar *enc_name;
+    PreEncKind kind;
+    const gchar *parser;
+} PreEncSpec;
+
+static const PreEncSpec pre_enc_specs[] = {
+    { "vah264enc",     PRE_ENC_VAAPI,        "! h264parse" },
+    { "vah264lpenc",   PRE_ENC_VAAPI,        "! h264parse" },
+    { "vaapih264enc",  PRE_ENC_VAAPI_LEGACY, "! h264parse" },
+    { "vah265enc",     PRE_ENC_VAAPI,        "! h265parse" },
+    { "vah265lpenc",   PRE_ENC_VAAPI,        "! h265parse" },
+    { "vaapih265enc",  PRE_ENC_VAAPI_LEGACY, "! h265parse" },
+    { "vavp8enc",      PRE_ENC_VAAPI,        "" },
+    { "vavp9enc",      PRE_ENC_VAAPI,        "" },
+    { "vaapivp8enc",   PRE_ENC_VAAPI_LEGACY, "" },
+    { "vaapivp9enc",   PRE_ENC_VAAPI_LEGACY, "" },
+    { "vaav1enc",      PRE_ENC_VAAPI,        "! av1parse" },
+    { "vulkanh264enc", PRE_ENC_VULKAN,       "! h264parse" },
+    { "vulkanh265enc", PRE_ENC_VULKAN,       "! h265parse" },
+    { "nvh264enc",     PRE_ENC_NVENC,        "! h264parse" },
+    { "nvh265enc",     PRE_ENC_NVENC,        "! h265parse" },
+    { "vp8enc",        PRE_ENC_I420_VPX,     "" },
+    { "vp9enc",        PRE_ENC_I420_VPX,     "" },
+    { "x264enc",       PRE_ENC_I420_X264,    "! h264parse" },
+    { "openh264enc",   PRE_ENC_I420_OPENH264,"! h264parse" },
+    { "x265enc",       PRE_ENC_I420_X265,    "! h265parse" },
+    { "svtav1enc",     PRE_ENC_I420_SVTAV1,  "! av1parse" }
+};
 
 static void
 append_pre_encode (GString *s,
@@ -166,93 +271,72 @@ append_pre_encode (GString *s,
 
     guint va_usage = (cfg->performance_mode == RECGO_PERF_LOW_POWER) ? 7 : 6;
 
-    if (g_strcmp0 (enc_name, "vah264enc") == 0 ||
-        g_strcmp0 (enc_name, "vah264lpenc") == 0) {
-        g_string_append_printf (s, recgo_has_gst_element ("vapostproc")
-            ? "videoconvert n-threads=%u ! vapostproc ! video/x-raw,format=NV12"
-            : "videoconvert n-threads=%u ! video/x-raw,format=NV12", threads);
-        g_string_printf (opts_out, "bitrate=%u key-int-max=%u target-usage=%u",
-                         bitrate_kbps, gop, va_usage);
-        *post_out = "! h264parse";
-    } else if (g_strcmp0 (enc_name, "vaapih264enc") == 0) {
-        g_string_append_printf (s, "videoconvert n-threads=%u ! video/x-raw,format=NV12", threads);
-        g_string_printf (opts_out, "bitrate=%u keyframe-period=%u", bitrate_kbps, gop);
-        *post_out = "! h264parse";
-    } else if (g_strcmp0 (enc_name, "vah265enc") == 0 ||
-               g_strcmp0 (enc_name, "vah265lpenc") == 0) {
-        g_string_append_printf (s, recgo_has_gst_element ("vapostproc")
-            ? "videoconvert n-threads=%u ! vapostproc ! video/x-raw,format=NV12"
-            : "videoconvert n-threads=%u ! video/x-raw,format=NV12", threads);
-        g_string_printf (opts_out, "bitrate=%u key-int-max=%u target-usage=%u",
-                         bitrate_kbps, gop, va_usage);
-        *post_out = "! h265parse";
-    } else if (g_strcmp0 (enc_name, "vaapih265enc") == 0) {
-        g_string_append_printf (s, "videoconvert n-threads=%u ! video/x-raw,format=NV12", threads);
-        g_string_printf (opts_out, "bitrate=%u keyframe-period=%u", bitrate_kbps, gop);
-        *post_out = "! h265parse";
-    } else if (g_strcmp0 (enc_name, "vavp8enc") == 0 ||
-               g_strcmp0 (enc_name, "vavp9enc") == 0) {
-        g_string_append_printf (s, recgo_has_gst_element ("vapostproc")
-            ? "videoconvert n-threads=%u ! vapostproc ! video/x-raw,format=NV12"
-            : "videoconvert n-threads=%u ! video/x-raw,format=NV12", threads);
-        g_string_printf (opts_out, "bitrate=%u key-int-max=%u", bitrate_kbps, gop);
-        *post_out = "";
-    } else if (g_strcmp0 (enc_name, "vaapivp8enc") == 0 ||
-               g_strcmp0 (enc_name, "vaapivp9enc") == 0) {
-        g_string_append_printf (s, "videoconvert n-threads=%u ! video/x-raw,format=NV12", threads);
-        g_string_assign (opts_out, "");
-        *post_out = "";
-    } else if (g_strcmp0 (enc_name, "vaav1enc") == 0) {
-        g_string_append_printf (s, recgo_has_gst_element ("vapostproc")
-            ? "videoconvert n-threads=%u ! vapostproc ! video/x-raw,format=NV12"
-            : "videoconvert n-threads=%u ! video/x-raw,format=NV12", threads);
-        g_string_printf (opts_out, "bitrate=%u key-int-max=%u", bitrate_kbps, gop);
-        *post_out = "! av1parse";
-    } else if (g_strcmp0 (enc_name, "vulkanh264enc") == 0) {
-        g_string_append_printf (s, "videoconvert n-threads=%u ! vulkanupload ! vulkancolorconvert", threads);
-        g_string_assign (opts_out, "");
-        *post_out = "! h264parse";
-    } else if (g_strcmp0 (enc_name, "vulkanh265enc") == 0) {
-        g_string_append_printf (s, "videoconvert n-threads=%u ! vulkanupload ! vulkancolorconvert", threads);
-        g_string_assign (opts_out, "");
-        *post_out = "! h265parse";
-    } else if (g_strcmp0 (enc_name, "nvh264enc") == 0) {
-        g_string_append_printf (s, "videoconvert n-threads=%u ! video/x-raw,format=NV12", threads);
-        g_string_printf (opts_out, "bitrate=%u gop-size=%u", bitrate_kbps, gop);
-        *post_out = "! h264parse";
-    } else if (g_strcmp0 (enc_name, "nvh265enc") == 0) {
-        g_string_append_printf (s, "videoconvert n-threads=%u ! video/x-raw,format=NV12", threads);
-        g_string_printf (opts_out, "bitrate=%u gop-size=%u", bitrate_kbps, gop);
-        *post_out = "! h265parse";
-    } else if (g_strcmp0 (enc_name, "vp8enc") == 0) {
-        guint cpu_used = (cfg->performance_mode == RECGO_PERF_QUALITY) ? 4 : 8;
-        g_string_append_printf (s, "videoconvert n-threads=%u ! video/x-raw,format=I420", threads);
-        g_string_printf (opts_out, "deadline=1 cpu-used=%u target-bitrate=%u keyframe-max-dist=%u threads=%u",
-                         cpu_used, bitrate_kbps * 1000U, gop, threads);
-        *post_out = "";
-    } else if (g_strcmp0 (enc_name, "vp9enc") == 0) {
-        g_string_append_printf (s, "videoconvert n-threads=%u ! video/x-raw,format=I420", threads);
-        g_string_printf (opts_out, "deadline=1 cpu-used=8 target-bitrate=%u keyframe-max-dist=%u threads=%u",
-                         bitrate_kbps * 1000U, gop, threads);
-        *post_out = "";
-    } else if (g_strcmp0 (enc_name, "x264enc") == 0) {
-        g_string_append_printf (s, "videoconvert n-threads=%u ! video/x-raw,format=I420", threads);
-        g_string_printf (opts_out, "speed-preset=ultrafast tune=zerolatency bitrate=%u key-int-max=%u threads=%u",
-                         bitrate_kbps, gop, threads);
-        *post_out = "! h264parse";
-    } else if (g_strcmp0 (enc_name, "openh264enc") == 0) {
-        g_string_append_printf (s, "videoconvert n-threads=%u ! video/x-raw,format=I420", threads);
-        g_string_printf (opts_out, "bitrate=%u complexity=low", bitrate_kbps * 1000U);
-        *post_out = "! h264parse";
-    } else if (g_strcmp0 (enc_name, "x265enc") == 0) {
-        g_string_append_printf (s, "videoconvert n-threads=%u ! video/x-raw,format=I420", threads);
-        g_string_printf (opts_out, "speed-preset=ultrafast tune=zerolatency bitrate=%u key-int-max=%u",
-                         bitrate_kbps, gop);
-        *post_out = "! h265parse";
-    } else {
+    const PreEncSpec *spec = NULL;
+    for (gsize i = 0; i < G_N_ELEMENTS (pre_enc_specs); i++) {
+        if (g_strcmp0 (enc_name, pre_enc_specs[i].enc_name) == 0) {
+            spec = &pre_enc_specs[i];
+            break;
+        }
+    }
+
+    if (!spec) {
         g_string_append_printf (s, "videoconvert n-threads=%u", threads);
         g_string_assign (opts_out, "");
         *post_out = "";
+        return;
+    }
+
+    *post_out = spec->parser;
+    switch (spec->kind) {
+    case PRE_ENC_VAAPI:
+        g_string_append_printf (s, recgo_has_gst_element ("vapostproc")
+            ? "videoconvert n-threads=%u ! vapostproc ! video/x-raw,format=NV12"
+            : "videoconvert n-threads=%u ! video/x-raw,format=NV12", threads);
+        if (g_str_has_prefix (enc_name, "vah26"))
+            g_string_printf (opts_out, "bitrate=%u key-int-max=%u target-usage=%u", bitrate_kbps, gop, va_usage);
+        else
+            g_string_printf (opts_out, "bitrate=%u key-int-max=%u", bitrate_kbps, gop);
+        break;
+    case PRE_ENC_VAAPI_LEGACY:
+        g_string_append_printf (s, "videoconvert n-threads=%u ! video/x-raw,format=NV12", threads);
+        if (g_str_has_prefix (enc_name, "vaapih26"))
+            g_string_printf (opts_out, "bitrate=%u keyframe-period=%u", bitrate_kbps, gop);
+        else
+            g_string_assign (opts_out, "");
+        break;
+    case PRE_ENC_VULKAN:
+        g_string_append_printf (s, "videoconvert n-threads=%u ! vulkanupload ! vulkancolorconvert", threads);
+        g_string_assign (opts_out, "");
+        break;
+    case PRE_ENC_NVENC:
+        g_string_append_printf (s, "videoconvert n-threads=%u ! video/x-raw,format=NV12", threads);
+        g_string_printf (opts_out, "bitrate=%u gop-size=%u", bitrate_kbps, gop);
+        break;
+    case PRE_ENC_I420_VPX: {
+        guint cpu_used = (g_strcmp0 (enc_name, "vp8enc") == 0 && cfg->performance_mode == RECGO_PERF_QUALITY) ? 4 : 8;
+        g_string_append_printf (s, "videoconvert n-threads=%u ! video/x-raw,format=I420", threads);
+        g_string_printf (opts_out, "deadline=1 cpu-used=%u target-bitrate=%u keyframe-max-dist=%u threads=%u",
+                         cpu_used, bitrate_kbps * 1000U, gop, threads);
+        break;
+    }
+    case PRE_ENC_I420_X264:
+        g_string_append_printf (s, "videoconvert n-threads=%u ! video/x-raw,format=I420", threads);
+        g_string_printf (opts_out, "speed-preset=ultrafast tune=zerolatency bitrate=%u key-int-max=%u threads=%u",
+                         bitrate_kbps, gop, threads);
+        break;
+    case PRE_ENC_I420_OPENH264:
+        g_string_append_printf (s, "videoconvert n-threads=%u ! video/x-raw,format=I420", threads);
+        g_string_printf (opts_out, "bitrate=%u complexity=low", bitrate_kbps * 1000U);
+        break;
+    case PRE_ENC_I420_X265:
+        g_string_append_printf (s, "videoconvert n-threads=%u ! video/x-raw,format=I420", threads);
+        g_string_printf (opts_out, "speed-preset=ultrafast tune=zerolatency bitrate=%u key-int-max=%u",
+                         bitrate_kbps, gop);
+        break;
+    case PRE_ENC_I420_SVTAV1:
+        g_string_append_printf (s, "videoconvert n-threads=%u ! video/x-raw,format=I420", threads);
+        g_string_printf (opts_out, "target-bitrate=%u preset=10", bitrate_kbps);
+        break;
     }
 }
 
@@ -282,39 +366,47 @@ append_preview_branch (GString *s, const SavedRecordConfig *cfg)
 static void
 append_audio_branch (GString *s, const SavedRecordConfig *cfg)
 {
-    if (!cfg->mic_enabled || !cfg->microphones || cfg->microphones->len == 0)
+    if (!cfg->microphones || cfg->microphones->len == 0)
         return;
 
     const gchar *audio_enc = (cfg->container == RECGO_CONTAINER_MP4 && recgo_has_gst_element ("avenc_aac"))
         ? "avenc_aac"
         : "opusenc";
+    const gchar *mute_str = cfg->mic_enabled ? "false" : "true";
+    gboolean has_vol = recgo_has_gst_element ("volume");
 
-    if (cfg->microphones->len == 1) {
+    if (recgo_has_gst_element ("audiomixer")) {
+        g_string_append_printf (s,
+            " audiomixer name=amix latency=40000000 alignment-threshold=40000000 ! "
+            "audioconvert ! audioresample ! audiorate ! "
+            "audio/x-raw,format=F32LE,rate=48000,channels=2 ! %s ! queue ! mux.",
+            audio_enc);
+
+        for (guint i = 0; i < cfg->microphones->len; i++) {
+            const RecGoDeviceInfo *mic = g_ptr_array_index (cfg->microphones, i);
+            gchar *src = recgo_device_info_build_source_pipeline (mic);
+            if (!src)
+                continue;
+            g_string_append_printf (s,
+                " %s ! queue max-size-time=200000000 ! "
+                "audioconvert ! audioresample ! audio/x-raw,format=F32LE,rate=48000,channels=2 ! ",
+                src);
+            if (has_vol)
+                g_string_append_printf (s, "volume name=mic_vol_%u mute=%s ! ", i, mute_str);
+            g_string_append_printf (s, "amix.sink_%u", i);
+            g_free (src);
+        }
+    } else {
         const RecGoDeviceInfo *mic = g_ptr_array_index (cfg->microphones, 0);
         gchar *src = recgo_device_info_build_source_pipeline (mic);
         if (!src)
             return;
         g_string_append_printf (s,
-            " %s ! queue max-size-buffers=12 leaky=downstream ! "
-            "audioconvert ! audioresample ! audiorate ! %s ! queue ! mux.",
-            src, audio_enc);
-        g_free (src);
-        return;
-    }
-
-    g_string_append_printf (s,
-        " audiomixer name=amix ! audioconvert ! audioresample ! %s ! queue ! mux.",
-        audio_enc);
-
-    for (guint i = 0; i < cfg->microphones->len; i++) {
-        const RecGoDeviceInfo *mic = g_ptr_array_index (cfg->microphones, i);
-        gchar *src = recgo_device_info_build_source_pipeline (mic);
-        if (!src)
-            continue;
-        g_string_append_printf (s,
-            " %s ! queue max-size-buffers=12 leaky=downstream ! "
-            "audioconvert ! audioresample ! audiorate ! amix.sink_%u",
-            src, i);
+            " %s ! queue max-size-time=200000000 ! audioconvert ! audioresample ! audiorate ! ",
+            src);
+        if (has_vol)
+            g_string_append_printf (s, "volume name=mic_vol_0 mute=%s ! ", mute_str);
+        g_string_append_printf (s, "%s ! queue ! mux.", audio_enc);
         g_free (src);
     }
 }
@@ -353,8 +445,8 @@ compute_pip_box (const SavedRecordConfig *cfg, guint screen_w, guint screen_h, g
         gint vis_h = even_i (MAX (64, (gint) lround (cam_h_f)));
 
         gint pad = recgo_video_fx_get_shadow_pad (cfg->image_config.shadow_enabled);
-        out->x = vis_x - pad;
-        out->y = vis_y - pad;
+        out->x = MAX (0, vis_x - pad);
+        out->y = MAX (0, vis_y - pad);
         out->w = even_i (vis_w + 2 * pad);
         out->h = even_i (vis_h + 2 * pad);
         out->mask_inset = pad;
@@ -374,6 +466,102 @@ compute_pip_box (const SavedRecordConfig *cfg, guint screen_w, guint screen_h, g
         out->mask_shape = RECGO_SHAPE_RECTANGLE;
         out->mask_shadow = FALSE;
     }
+}
+
+typedef struct {
+    GstElement *comp;
+    guint sink_idx;
+    gint slot_x;
+    gint slot_y;
+    gint slot_w;
+    gint slot_h;
+} ScreenSlotProbeData;
+
+static void
+screen_slot_probe_data_free (gpointer ptr)
+{
+    ScreenSlotProbeData *d = (ScreenSlotProbeData *) ptr;
+    if (!d)
+        return;
+    gst_clear_object (&d->comp);
+    g_free (d);
+}
+
+static void
+compute_screen_slot (guint index,
+                     guint n_screens,
+                     guint canvas_w,
+                     guint canvas_h,
+                     RecGoLayoutPreset layout,
+                     gint *out_x,
+                     gint *out_y,
+                     gint *out_w,
+                     gint *out_h)
+{
+    guint area_w = (layout == RECGO_LAYOUT_SIDE_BY_SIDE) ? even_u (canvas_w / 2U) : canvas_w;
+    guint area_h = canvas_h;
+
+    if (n_screens <= 1) {
+        *out_x = 0;
+        *out_y = 0;
+        *out_w = (gint) area_w;
+        *out_h = (gint) area_h;
+        return;
+    }
+
+    guint cols = (layout == RECGO_LAYOUT_SIDE_BY_SIDE) ? 1U : 2U;
+    guint rows = (n_screens + cols - 1U) / cols;
+    guint cell_w = even_u (MAX (160U, area_w / cols));
+    guint cell_h = even_u (MAX (120U, area_h / rows));
+    guint col = index % cols;
+    guint row = index / cols;
+
+    *out_x = (gint) (col * cell_w);
+    *out_y = (gint) (row * cell_h);
+    *out_w = (gint) cell_w;
+    *out_h = (gint) cell_h;
+}
+
+static GstPadProbeReturn
+on_gl_screen_caps_probe (GstPad *pad, GstPadProbeInfo *info, gpointer user_data)
+{
+    (void) pad;
+    ScreenSlotProbeData *data = (ScreenSlotProbeData *) user_data;
+    GstEvent *ev = GST_PAD_PROBE_INFO_EVENT (info);
+    if (!ev || GST_EVENT_TYPE (ev) != GST_EVENT_CAPS || !data || !data->comp)
+        return GST_PAD_PROBE_OK;
+
+    GstCaps *caps = NULL;
+    gst_event_parse_caps (ev, &caps);
+    if (!caps)
+        return GST_PAD_PROBE_OK;
+
+    GstStructure *st = gst_caps_get_structure (caps, 0);
+    gint in_w = 0, in_h = 0;
+    if (!st || !gst_structure_get_int (st, "width", &in_w) || !gst_structure_get_int (st, "height", &in_h) || in_w <= 0 || in_h <= 0)
+        return GST_PAD_PROBE_OK;
+
+    gdouble scale = MIN ((gdouble) data->slot_w / (gdouble) in_w, (gdouble) data->slot_h / (gdouble) in_h);
+    gint fit_w = even_i (MAX (16, (gint) lround ((gdouble) in_w * scale)));
+    gint fit_h = even_i (MAX (16, (gint) lround ((gdouble) in_h * scale)));
+    fit_w = MIN (fit_w, data->slot_w);
+    fit_h = MIN (fit_h, data->slot_h);
+    gint fit_x = data->slot_x + (data->slot_w - fit_w) / 2;
+    gint fit_y = data->slot_y + (data->slot_h - fit_h) / 2;
+
+    gchar *pad_name = g_strdup_printf ("sink_%u", data->sink_idx);
+    GstPad *comp_pad = gst_element_get_static_pad (data->comp, pad_name);
+    g_free (pad_name);
+    if (comp_pad) {
+        g_object_set (comp_pad,
+                      "xpos", fit_x,
+                      "ypos", fit_y,
+                      "width", fit_w,
+                      "height", fit_h,
+                      NULL);
+        gst_object_unref (comp_pad);
+    }
+    return GST_PAD_PROBE_OK;
 }
 
 static gboolean
@@ -416,28 +604,41 @@ build_pipeline_attempt (RecGoRecorder *self,
     gboolean has_aspectcrop = recgo_has_gst_element ("aspectratiocrop");
 
     guint n_cams = cfg->cameras ? cfg->cameras->len : 0;
-    gboolean has_screen = (cfg->screen_fd >= 0 && cfg->layout != RECGO_LAYOUT_CAMERA_ONLY);
-    int dup_screen_fd = -1;
+    guint n_screens = (cfg->layout != RECGO_LAYOUT_CAMERA_ONLY && cfg->screen_streams)
+        ? cfg->screen_streams->len
+        : 0;
+    gboolean has_screen = (n_screens > 0);
 
+    GArray *dup_fds = g_array_new (FALSE, FALSE, sizeof (int));
     if (has_screen) {
-        dup_screen_fd = fcntl (cfg->screen_fd, F_DUPFD_CLOEXEC, 3);
-        if (dup_screen_fd < 0) {
-            g_string_free (pre_encode, TRUE);
-            g_string_free (enc_opts, TRUE);
-            g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                         "Failed to duplicate PipeWire screen FD");
-            return FALSE;
+        for (guint i = 0; i < n_screens; i++) {
+            const RecGoScreenStream *s = g_ptr_array_index (cfg->screen_streams, i);
+            int dup_fd = (s && s->fd >= 0) ? fcntl (s->fd, F_DUPFD_CLOEXEC, 3) : -1;
+            if (dup_fd < 0) {
+                for (guint j = 0; j < dup_fds->len; j++)
+                    close (g_array_index (dup_fds, int, j));
+                g_array_free (dup_fds, TRUE);
+                g_string_free (pre_encode, TRUE);
+                g_string_free (enc_opts, TRUE);
+                g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                             "Failed to duplicate PipeWire screen FD");
+                return FALSE;
+            }
+            g_array_append_val (dup_fds, dup_fd);
         }
     }
 
     GString *pipeline_str = g_string_new ("");
     GArray *boxes = g_array_new (FALSE, FALSE, sizeof (CamBox));
+    GArray *screen_slots = g_array_new (FALSE, FALSE, sizeof (ScreenSlotProbeData));
 
     if (!has_screen && cfg->layout == RECGO_LAYOUT_CAMERA_ONLY && n_cams == 1) {
         const RecGoDeviceInfo *cam = g_ptr_array_index (cfg->cameras, 0);
         gchar *src = recgo_device_info_build_source_pipeline (cam);
         if (!src) {
+            g_array_free (screen_slots, TRUE);
             g_array_free (boxes, TRUE);
+            g_array_free (dup_fds, TRUE);
             g_string_free (pipeline_str, TRUE);
             g_string_free (pre_encode, TRUE);
             g_string_free (enc_opts, TRUE);
@@ -466,22 +667,25 @@ build_pipeline_attempt (RecGoRecorder *self,
             pre_encode->str, enc_name, enc_opts->str, post_encode, muxer_spec, cfg->output_path);
         append_preview_branch (pipeline_str, cfg);
         g_free (src);
-    } else if (has_screen && (cfg->layout == RECGO_LAYOUT_SCREEN_ONLY || n_cams == 0)) {
+    } else if (has_screen && n_screens == 1 && (cfg->layout == RECGO_LAYOUT_SCREEN_ONLY || n_cams == 0)) {
+        const RecGoScreenStream *s0 = g_ptr_array_index (cfg->screen_streams, 0);
+        int dup_fd = g_array_index (dup_fds, int, 0);
         g_string_append_printf (pipeline_str,
             "pipewiresrc fd=%d path=%u do-timestamp=true ! queue max-size-buffers=3 leaky=downstream ! ",
-            dup_screen_fd, cfg->screen_node_id);
+            dup_fd, s0->node_id);
         if (has_videorate)
             g_string_append_printf (pipeline_str, "videorate drop-only=true max-rate=%u ! ", fps);
         g_string_append_printf (pipeline_str,
-            "videoconvert n-threads=%u ! videoscale method=1 n-threads=%u ! video/x-raw,width=%u,height=%u ! tee name=t "
+            "videoconvert n-threads=%u ! videoscale method=1 add-borders=true n-threads=%u ! "
+            "video/x-raw,width=%u,height=%u,pixel-aspect-ratio=1/1 ! tee name=t "
             "t. ! queue max-size-buffers=8 ! %s ! %s %s %s ! queue ! %s name=mux ! filesink location=\"%s\"",
             threads, threads, screen_w, screen_h,
             pre_encode->str, enc_name, enc_opts->str, post_encode, muxer_spec, cfg->output_path);
         append_preview_branch (pipeline_str, cfg);
     } else {
-        /* Multi-input compositing (DesktopPiP, SideBySide, or Multi-Cam CameraOnly) */
+        /* Multi-input compositing (Multi-Screen, DesktopPiP, SideBySide, or Multi-Cam CameraOnly) */
         const gchar *post_mixer = use_gl ? "gldownload ! videoconvert" : "videoconvert";
-        guint sink_idx = 0;
+        guint sink_idx = n_screens;
 
         if (use_gl) {
             g_string_append (pipeline_str, "glvideomixer name=comp background=black ");
@@ -489,12 +693,18 @@ build_pipeline_attempt (RecGoRecorder *self,
             g_string_append_printf (pipeline_str, "compositor name=comp background=black max-threads=%u ", threads);
         }
 
-        if (has_screen) {
-            guint sw = even_u ((cfg->layout == RECGO_LAYOUT_SIDE_BY_SIDE) ? (screen_w / 2) : screen_w);
+        for (guint i = 0; i < n_screens; i++) {
+            ScreenSlotProbeData slot = { 0 };
+            slot.sink_idx = i;
+            compute_screen_slot (i, n_screens, screen_w, screen_h, cfg->layout,
+                                 &slot.slot_x, &slot.slot_y, &slot.slot_w, &slot.slot_h);
+            g_array_append_val (screen_slots, slot);
             g_string_append_printf (pipeline_str,
-                "sink_0::xpos=0 sink_0::ypos=0 sink_0::width=%u sink_0::height=%u ",
-                sw, screen_h);
-            sink_idx = 1;
+                "sink_%u::xpos=%d sink_%u::ypos=%d sink_%u::width=%d sink_%u::height=%d ",
+                i, slot.slot_x,
+                i, slot.slot_y,
+                i, slot.slot_w,
+                i, slot.slot_h);
         }
 
         for (guint i = 0; i < n_cams; i++) {
@@ -540,21 +750,25 @@ build_pipeline_attempt (RecGoRecorder *self,
             post_mixer, pre_encode->str, enc_name, enc_opts->str, post_encode, muxer_spec, cfg->output_path);
         append_preview_branch (pipeline_str, cfg);
 
-        if (has_screen) {
-            guint sw = even_u ((cfg->layout == RECGO_LAYOUT_SIDE_BY_SIDE) ? (screen_w / 2) : screen_w);
+        for (guint i = 0; i < n_screens; i++) {
+            const RecGoScreenStream *s = g_ptr_array_index (cfg->screen_streams, i);
+            int dup_fd = g_array_index (dup_fds, int, i);
+            ScreenSlotProbeData slot = g_array_index (screen_slots, ScreenSlotProbeData, i);
+
             g_string_append_printf (pipeline_str,
                 " pipewiresrc fd=%d path=%u do-timestamp=true ! queue max-size-buffers=3 leaky=downstream ! ",
-                dup_screen_fd, cfg->screen_node_id);
+                dup_fd, s->node_id);
             if (has_videorate)
                 g_string_append_printf (pipeline_str, "videorate drop-only=true max-rate=%u ! ", fps);
             if (use_gl) {
                 g_string_append_printf (pipeline_str,
-                    "glupload ! glcolorconvert ! glcolorscale ! video/x-raw(memory:GLMemory),width=%u,height=%u ! comp.sink_0",
-                    sw, screen_h);
+                    "glupload name=gl_screen_%u ! glcolorconvert ! comp.sink_%u",
+                    i, i);
             } else {
                 g_string_append_printf (pipeline_str,
-                    "videoconvert n-threads=%u ! videoscale method=1 n-threads=%u ! video/x-raw,width=%u,height=%u ! comp.sink_0",
-                    threads, threads, sw, screen_h);
+                    "videoconvert n-threads=%u ! videoscale method=1 add-borders=true n-threads=%u ! "
+                    "video/x-raw,width=%d,height=%d,pixel-aspect-ratio=1/1 ! comp.sink_%u",
+                    threads, threads, slot.slot_w, slot.slot_h, i);
             }
         }
 
@@ -604,12 +818,45 @@ build_pipeline_attempt (RecGoRecorder *self,
     g_string_free (pipeline_str, TRUE);
 
     if (!el) {
-        if (dup_screen_fd >= 0)
-            close (dup_screen_fd);
+        for (guint j = 0; j < dup_fds->len; j++)
+            close (g_array_index (dup_fds, int, j));
+        g_array_free (dup_fds, TRUE);
+        g_array_free (screen_slots, TRUE);
         g_array_free (boxes, TRUE);
         g_propagate_error (error, parse_err);
         return FALSE;
     }
+    g_array_free (dup_fds, TRUE);
+
+    /* Attach dynamic aspect-ratio caps probes for GL screen/window branches */
+    if (use_gl && screen_slots->len > 0) {
+        GstElement *comp = gst_bin_get_by_name (GST_BIN (el), "comp");
+        if (comp) {
+            for (guint i = 0; i < screen_slots->len; i++) {
+                ScreenSlotProbeData slot = g_array_index (screen_slots, ScreenSlotProbeData, i);
+                gchar *gl_name = g_strdup_printf ("gl_screen_%u", i);
+                GstElement *gl_el = gst_bin_get_by_name (GST_BIN (el), gl_name);
+                g_free (gl_name);
+                if (gl_el) {
+                    GstPad *src_pad = gst_element_get_static_pad (gl_el, "src");
+                    if (src_pad) {
+                        ScreenSlotProbeData *pdata = g_new (ScreenSlotProbeData, 1);
+                        *pdata = slot;
+                        pdata->comp = gst_object_ref (comp);
+                        gst_pad_add_probe (src_pad,
+                                           GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM,
+                                           on_gl_screen_caps_probe,
+                                           pdata,
+                                           screen_slot_probe_data_free);
+                        gst_object_unref (src_pad);
+                    }
+                    gst_object_unref (gl_el);
+                }
+            }
+            gst_object_unref (comp);
+        }
+    }
+    g_array_free (screen_slots, TRUE);
 
     /* Attach RecGoVideoFx pad probes to every camera branch for image FX + shape mask */
     for (guint i = 0; i < boxes->len; i++) {
@@ -669,8 +916,21 @@ recgo_recorder_new (const RecGoRecordConfig *cfg, GError **error)
     }
 
     guint n_cams = cfg->cameras ? cfg->cameras->len : 0;
-    gboolean has_screen = (cfg->screen_fd >= 0 && cfg->layout != RECGO_LAYOUT_CAMERA_ONLY);
+    GPtrArray *streams = clone_screen_array (cfg->screen_streams);
+    if (streams->len == 0 && cfg->screen_fd >= 0) {
+        RecGoScreenStream *legacy = recgo_screen_stream_new (cfg->screen_fd,
+                                                             cfg->screen_node_id,
+                                                             cfg->screen_width,
+                                                             cfg->screen_height);
+        if (legacy->fd >= 0)
+            g_ptr_array_add (streams, legacy);
+        else
+            recgo_screen_stream_free (legacy);
+    }
+
+    gboolean has_screen = (streams->len > 0 && cfg->layout != RECGO_LAYOUT_CAMERA_ONLY);
     if (!has_screen && (cfg->layout == RECGO_LAYOUT_SCREEN_ONLY || n_cams == 0)) {
+        g_ptr_array_unref (streams);
         g_set_error (error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
                      "Screen stream or at least one camera is required");
         return NULL;
@@ -678,15 +938,7 @@ recgo_recorder_new (const RecGoRecordConfig *cfg, GError **error)
 
     RecGoRecorder *self = g_object_new (RECGO_TYPE_RECORDER, NULL);
     self->cfg.screen_fd = -1;
-    if (has_screen) {
-        self->cfg.screen_fd = fcntl (cfg->screen_fd, F_DUPFD_CLOEXEC, 3);
-        if (self->cfg.screen_fd < 0) {
-            g_object_unref (self);
-            g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                         "Failed to duplicate PipeWire screen FD");
-            return NULL;
-        }
-    }
+    self->cfg.screen_streams = streams;
 
     self->cfg.screen_node_id = cfg->screen_node_id;
     self->cfg.screen_width = cfg->screen_width;
@@ -984,11 +1236,37 @@ recgo_recorder_update_image_config (RecGoRecorder *self,
     }
 }
 
+void
+recgo_recorder_set_mic_muted (RecGoRecorder *self, gboolean muted)
+{
+    g_return_if_fail (RECGO_IS_RECORDER (self));
+    self->cfg.mic_enabled = !muted;
+    if (!self->pipeline || !self->cfg.microphones)
+        return;
+
+    for (guint i = 0; i < self->cfg.microphones->len; i++) {
+        gchar *name = g_strdup_printf ("mic_vol_%u", i);
+        GstElement *vol = gst_bin_get_by_name (GST_BIN (self->pipeline), name);
+        g_free (name);
+        if (vol) {
+            g_object_set (vol, "mute", muted, NULL);
+            gst_object_unref (vol);
+        }
+    }
+}
+
 const gchar *
 recgo_recorder_get_encoder_description (RecGoRecorder *self)
 {
     g_return_val_if_fail (RECGO_IS_RECORDER (self), "");
     return self->encoder_description ? self->encoder_description : "";
+}
+
+const gchar *
+recgo_recorder_get_output_path (RecGoRecorder *self)
+{
+    g_return_val_if_fail (RECGO_IS_RECORDER (self), "");
+    return self->cfg.output_path ? self->cfg.output_path : "";
 }
 
 RecGoPreviewFeed *

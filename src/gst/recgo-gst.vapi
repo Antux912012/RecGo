@@ -135,12 +135,25 @@ namespace RecGo.Gst {
         QUALITY
     }
 
+    [Compact]
+    [CCode (cname = "RecGoScreenStream", free_function = "recgo_screen_stream_free", copy_function = "recgo_screen_stream_copy", cheader_filename = "recgo-recorder.h")]
+    public class ScreenStream {
+        [CCode (cname = "recgo_screen_stream_new")]
+        public ScreenStream (int fd, uint32 node_id, uint width, uint height);
+        public int fd;
+        public uint32 node_id;
+        public uint width;
+        public uint height;
+        public ScreenStream copy ();
+    }
+
     [CCode (cname = "RecGoRecordConfig", has_type_id = false, cheader_filename = "recgo-recorder.h")]
     public struct RecordConfig {
         public int screen_fd;
         public uint32 screen_node_id;
         public uint screen_width;
         public uint screen_height;
+        public unowned GLib.GenericArray<ScreenStream>? screen_streams;
         public unowned GLib.GenericArray<DeviceInfo>? cameras;
         public unowned GLib.GenericArray<DeviceInfo>? microphones;
         public bool mic_enabled;
@@ -168,11 +181,33 @@ namespace RecGo.Gst {
         public bool resume () throws GLib.Error;
         public void stop_async ();
         public void update_image_config (WebcamImageConfig image_cfg);
+        public void set_mic_muted (bool muted);
 
         public unowned string get_encoder_description ();
+        public unowned string get_output_path ();
         public unowned PreviewFeed? get_preview_feed ();
 
         public signal void stopped ();
         public signal void error (string message);
+    }
+
+    [CCode (cname = "RecGoEditSegment", has_type_id = false, cheader_filename = "recgo-editor.h")]
+    public struct EditSegment {
+        public uint64 start_ms;
+        public uint64 end_ms;
+    }
+
+    [CCode (cname = "RecGoEditor", cheader_filename = "recgo-editor.h")]
+    public class Editor : GLib.Object {
+        [CCode (cname = "recgo_editor_new")]
+        public Editor ();
+        public bool export_async (string input_path,
+                                  string output_path,
+                                  [CCode (array_length_type = "guint")] EditSegment[] segments,
+                                  VideoCodec codec,
+                                  ContainerFormat container) throws GLib.Error;
+        public void cancel ();
+        public signal void progress (double fraction);
+        public signal void finished (bool success, string? error_message);
     }
 }

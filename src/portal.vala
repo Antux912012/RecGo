@@ -1,29 +1,38 @@
 namespace RecGo {
 
-    public class CaptureStream : GLib.Object {
-        public int fd { get; private set; default = -1; }
+    public class CaptureStreamInfo : GLib.Object {
         public uint32 node_id { get; private set; }
         public int width { get; private set; }
         public int height { get; private set; }
 
-        private GLib.DBusConnection? conn;
-        private string? session_handle;
-
-        public CaptureStream (GLib.DBusConnection conn,
-                              string session_handle,
-                              int fd,
-                              uint32 node_id,
-                              int width,
-                              int height) {
-            this.conn = conn;
-            this.session_handle = session_handle;
-            this.fd = fd;
+        public CaptureStreamInfo (uint32 node_id, int width, int height) {
             this.node_id = node_id;
             this.width = width;
             this.height = height;
         }
+    }
 
-        ~CaptureStream () {
+    public class CaptureSession : GLib.Object {
+        public int fd { get; private set; default = -1; }
+        public uint32 source_type { get; private set; }
+        public GLib.GenericArray<CaptureStreamInfo> streams { get; private set; }
+
+        private GLib.DBusConnection? conn;
+        private string? session_handle;
+
+        public CaptureSession (GLib.DBusConnection conn,
+                               string session_handle,
+                               int fd,
+                               uint32 source_type,
+                               GLib.GenericArray<CaptureStreamInfo> streams) {
+            this.conn = conn;
+            this.session_handle = session_handle;
+            this.fd = fd;
+            this.source_type = source_type;
+            this.streams = streams;
+        }
+
+        ~CaptureSession () {
             if (fd >= 0) {
                 Posix.close (fd);
                 fd = -1;
@@ -116,7 +125,7 @@ namespace RecGo {
             return result_variant;
         }
 
-        public static async CaptureStream start_screencast (uint32 source_type) throws GLib.Error {
+        public static async CaptureSession start_screencast (uint32 source_type, bool allow_multiple = true) throws GLib.Error {
             var conn = yield GLib.Bus.get (GLib.BusType.SESSION);
 
             // 1. CreateSession
@@ -147,7 +156,7 @@ namespace RecGo {
             var sel_opts = new GLib.VariantBuilder (new GLib.VariantType ("a{sv}"));
             sel_opts.add ("{sv}", "handle_token", new GLib.Variant.string (sel_tok));
             sel_opts.add ("{sv}", "types", new GLib.Variant.uint32 (source_type));
-            sel_opts.add ("{sv}", "multiple", new GLib.Variant.boolean (false));
+            sel_opts.add ("{sv}", "multiple", new GLib.Variant.boolean (allow_multiple));
             sel_opts.add ("{sv}", "cursor_mode", new GLib.Variant.uint32 (2));
             sel_opts.add ("{sv}", "persist_mode", new GLib.Variant.uint32 (2));
 
@@ -178,17 +187,22 @@ namespace RecGo {
                 throw new GLib.IOError.CANCELLED ("No screencast stream selected");
             }
 
-            uint32 node_id = 0;
-            GLib.Variant? stream_props = null;
-            streams_var.get_child (0, "(u@a{sv})", out node_id, out stream_props);
+            var stream_list = new GLib.GenericArray<CaptureStreamInfo> ();
+            size_t n_streams = streams_var.n_children ();
+            for (size_t i = 0; i < n_streams; i++) {
+                uint32 node_id = 0;
+                GLib.Variant? stream_props = null;
+                streams_var.get_child (i, "(u@a{sv})", out node_id, out stream_props);
 
-            int width = 1920;
-            int height = 1080;
-            if (stream_props != null) {
-                GLib.Variant? size_var = stream_props.lookup_value ("size", new GLib.VariantType ("(ii)"));
-                if (size_var != null) {
-                    size_var.get ("(ii)", out width, out height);
+                int width = 1920;
+                int height = 1080;
+                if (stream_props != null) {
+                    GLib.Variant? size_var = stream_props.lookup_value ("size", new GLib.VariantType ("(ii)"));
+                    if (size_var != null) {
+                        size_var.get ("(ii)", out width, out height);
+                    }
                 }
+                stream_list.add (new CaptureStreamInfo (node_id, width, height));
             }
 
             // 4. OpenPipeWireRemote
@@ -212,7 +226,7 @@ namespace RecGo {
             fd_ret.get ("(h)", out fd_idx);
             int pw_fd = out_fd_list.get (fd_idx);
 
-            return new CaptureStream (conn, session_handle, pw_fd, node_id, width, height);
+            return new CaptureSession (conn, session_handle, pw_fd, source_type, stream_list);
         }
     }
 

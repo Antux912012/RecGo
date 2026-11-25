@@ -257,8 +257,8 @@ recgo_preview_feed_new_screen (int pw_fd, guint32 node_id, GError **error)
     gchar *desc = g_strdup_printf (
         "pipewiresrc fd=%d path=%u do-timestamp=true ! "
         "queue max-size-buffers=2 leaky=downstream ! %s"
-        "videoconvert n-threads=2 ! videoscale method=1 n-threads=2 ! "
-        "video/x-raw,format=RGBA,width=854,height=480 ! "
+        "videoconvert n-threads=2 ! videoscale method=1 add-borders=true n-threads=2 ! "
+        "video/x-raw,format=RGBA,width=854,height=480,pixel-aspect-ratio=1/1 ! "
         "appsink name=sink max-buffers=1 drop=true sync=false",
         dup_fd, node_id, rate_stage);
 

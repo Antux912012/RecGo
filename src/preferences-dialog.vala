@@ -10,7 +10,6 @@ namespace RecGo {
         private ulong devices_changed_handler_id = 0;
 
         public signal void codec_changed (int codec_index);
-        public signal void countdown_changed (uint seconds, uint custom_seconds);
         public signal void devices_selection_changed ();
 
         public PreferencesDialog (SafeSettings settings,
@@ -19,11 +18,10 @@ namespace RecGo {
             this.settings = settings;
             this.device_manager = device_manager;
 
-            set_title ("Preferences & Diagnostics");
+            set_title ("Preferences");
 
             build_recording_page (current_codec_idx);
             build_devices_page ();
-            build_encoders_page ();
 
             devices_changed_handler_id = device_manager.devices_changed.connect (() => {
                 populate_device_rows ();
@@ -94,69 +92,6 @@ namespace RecGo {
             perf_group.add (fps_combo);
 
             rec_page.add (perf_group);
-
-            // Countdown group
-            var cd_group = new Adw.PreferencesGroup ();
-            cd_group.set_title ("Countdown Before Recording");
-            cd_group.set_description ("Prepare before capturing starts with an automatic countdown timer.");
-
-            string[] cd_options = {
-                "No Delay (0s)",
-                "3 seconds",
-                "5 seconds",
-                "10 seconds",
-                "Custom Duration (up to 5 min)"
-            };
-            var cd_list = new Gtk.StringList (cd_options);
-            var cd_combo = new Adw.ComboRow ();
-            cd_combo.set_title ("Countdown Preset");
-            cd_combo.set_subtitle ("Time delay after pressing Record");
-            cd_combo.set_model (cd_list);
-
-            uint cd_secs = settings.get_uint ("countdown-seconds", 3);
-            uint custom_secs = settings.get_uint ("custom-countdown-seconds", 15);
-
-            uint initial_idx;
-            switch (cd_secs) {
-            case 0:  initial_idx = 0; break;
-            case 3:  initial_idx = 1; break;
-            case 5:  initial_idx = 2; break;
-            case 10: initial_idx = 3; break;
-            default: initial_idx = 4; break;
-            }
-            cd_combo.set_selected (initial_idx);
-
-            var spin_row = new Adw.SpinRow.with_range (1.0, 300.0, 1.0);
-            spin_row.set_title ("Custom Duration (seconds)");
-            spin_row.set_subtitle ("Configurable from 1 second up to 300 seconds (5 minutes)");
-            double init_spin = (initial_idx == 4) ? (double) cd_secs : (double) custom_secs;
-            spin_row.set_value (init_spin.clamp (1.0, 300.0));
-            spin_row.set_visible (initial_idx == 4);
-
-            cd_combo.notify["selected"].connect (() => {
-                uint sel = cd_combo.get_selected ();
-                spin_row.set_visible (sel == 4);
-                uint secs;
-                switch (sel) {
-                case 0: secs = 0; break;
-                case 1: secs = 3; break;
-                case 2: secs = 5; break;
-                case 3: secs = 10; break;
-                default: secs = (uint) spin_row.get_value (); break;
-                }
-                countdown_changed (secs, (uint) spin_row.get_value ());
-            });
-
-            spin_row.get_adjustment ().value_changed.connect (() => {
-                if (cd_combo.get_selected () == 4) {
-                    uint val = (uint) spin_row.get_value ();
-                    countdown_changed (val, val);
-                }
-            });
-
-            cd_group.add (cd_combo);
-            cd_group.add (spin_row);
-            rec_page.add (cd_group);
 
             // Encoder selection group
             var enc_group = new Adw.PreferencesGroup ();
@@ -328,7 +263,7 @@ namespace RecGo {
                 }
             } else {
                 foreach (unowned string s in current) {
-                    if (s != target_id) {
+                    if (s != target_id && s != "none") {
                         list.add (s);
                     }
                 }
@@ -336,6 +271,8 @@ namespace RecGo {
 
             if (enabled) {
                 list.add (target_id);
+            } else if (list.length == 0) {
+                list.add ("none");
             }
 
             string[] out_arr = new string[list.length];
@@ -344,31 +281,6 @@ namespace RecGo {
             }
             settings.set_strv (key, out_arr);
             devices_selection_changed ();
-        }
-
-        private void build_encoders_page () {
-            var diag_page = new Adw.PreferencesPage ();
-            diag_page.set_title ("Encoders");
-            diag_page.set_icon_name ("video-display-symbolic");
-
-            var enc_group = new Adw.PreferencesGroup ();
-            enc_group.set_title ("Available GStreamer Elements");
-            enc_group.set_description ("Hardware encoders run directly on your GPU with near-zero CPU load.");
-
-            var codecs = Gst.get_supported_codecs ();
-            for (uint i = 0; i < codecs.length; i++) {
-                unowned var info = codecs.get (i);
-                var row = new Adw.ActionRow ();
-                row.set_title (info.display_name);
-                row.set_subtitle ("GStreamer element: %s — %s".printf (info.element_name, info.backend_label));
-                var badge = new Gtk.Label (info.is_hardware ? "GPU Hardware" : "CPU Software");
-                badge.add_css_class (info.is_hardware ? "accent" : "dim-label");
-                row.add_suffix (badge);
-                enc_group.add (row);
-            }
-
-            diag_page.add (enc_group);
-            add (diag_page);
         }
 
         private static void add_backend_row (Adw.PreferencesGroup group,

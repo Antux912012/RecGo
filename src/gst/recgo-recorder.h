@@ -22,13 +22,25 @@ typedef enum {
 } RecGoPerformanceMode;
 
 typedef struct {
-    int screen_fd;          /* -1 if no screen stream */
+    int fd;
+    guint32 node_id;
+    guint width;
+    guint height;
+} RecGoScreenStream;
+
+RecGoScreenStream *recgo_screen_stream_new (int fd, guint32 node_id, guint width, guint height);
+RecGoScreenStream *recgo_screen_stream_copy (const RecGoScreenStream *stream);
+void recgo_screen_stream_free (RecGoScreenStream *stream);
+
+typedef struct {
+    int screen_fd;          /* -1 if no screen stream (legacy single-screen field) */
     guint32 screen_node_id;
     guint screen_width;
     guint screen_height;
 
-    GPtrArray *cameras;     /* element type: RecGoDeviceInfo* (nullable/empty) */
-    GPtrArray *microphones; /* element type: RecGoDeviceInfo* (nullable/empty) */
+    GPtrArray *screen_streams; /* element type: RecGoScreenStream* (optional; overrides single screen_* if non-empty) */
+    GPtrArray *cameras;        /* element type: RecGoDeviceInfo* (nullable/empty) */
+    GPtrArray *microphones;    /* element type: RecGoDeviceInfo* (nullable/empty) */
     gboolean mic_enabled;
 
     RecGoLayoutPreset layout;
@@ -59,8 +71,10 @@ void recgo_recorder_stop_async (RecGoRecorder *self);
 
 void recgo_recorder_update_image_config (RecGoRecorder *self,
                                          const RecGoWebcamImageConfig *image_cfg);
+void recgo_recorder_set_mic_muted (RecGoRecorder *self, gboolean muted);
 
 const gchar *recgo_recorder_get_encoder_description (RecGoRecorder *self);
+const gchar *recgo_recorder_get_output_path (RecGoRecorder *self);
 RecGoPreviewFeed *recgo_recorder_get_preview_feed (RecGoRecorder *self);
 
 G_END_DECLS

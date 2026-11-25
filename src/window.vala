@@ -53,9 +53,12 @@ namespace RecGo {
         private int selected_codec_idx = 0;
 
         private GLib.GenericArray<Gst.PreviewFeed> webcam_feeds = new GLib.GenericArray<Gst.PreviewFeed> ();
-        private Gst.PreviewFeed? screen_preview_feed = null;
-        private CaptureStream? active_stream = null;
+        private GLib.GenericArray<Gst.PreviewFeed> screen_preview_feeds = new GLib.GenericArray<Gst.PreviewFeed> ();
+        private CaptureSession? active_session = null;
         private Gst.Recorder? recorder = null;
+        private Adw.ViewStack view_stack;
+        private EditorView editor_view;
+        private string last_saved_path = "";
         private string last_camera_signature = "";
 
         public bool is_recording { get; private set; default = false; }
@@ -259,8 +262,13 @@ namespace RecGo {
 
             // HeaderBar
             var header = new Adw.HeaderBar ();
-            win_title = new Adw.WindowTitle ("RecGo", "%s · %s".printf (gpu_summary, codec_desc));
-            header.set_title_widget (win_title);
+            win_title = new Adw.WindowTitle ("RecGo", codec_desc);
+
+            view_stack = new Adw.ViewStack ();
+            var switcher = new Adw.ViewSwitcher ();
+            switcher.set_stack (view_stack);
+            switcher.set_policy (Adw.ViewSwitcherPolicy.WIDE);
+            header.set_title_widget (switcher);
 
             source_dropdown = new Gtk.DropDown.from_strings ({
                 "Screen / Monitor",
@@ -353,11 +361,10 @@ namespace RecGo {
             register_window_actions ();
             toolbar_view.add_top_bar (header);
 
-            // Center Preview Stage
+            // Center Preview Stage + Edit Mode Stack
             preview = new PreviewWidget ();
-            var content_box = new Gtk.Box (Gtk.Orientation.VERTICAL, 0);
-            content_box.append (preview);
-            toolbar_view.set_content (content_box);
+            var record_page = new Gtk.Box (Gtk.Orientation.VERTICAL, 0);
+            record_page.append (preview);
 
             // Bottom Action Bar
             var action_bar = new Gtk.ActionBar ();
@@ -367,7 +374,6 @@ namespace RecGo {
             rec_icon = new Gtk.Image.from_icon_name ("media-record-symbolic");
             rec_icon.set_pixel_size (18);
             rec_label = new Gtk.Label ("Record");
-            rec_label.add_css_class ("camera-btn-label");
             rec_box.append (rec_icon);
             rec_box.append (rec_label);
             btn_record.set_child (rec_box);
@@ -379,11 +385,10 @@ namespace RecGo {
             var pause_icon = new Gtk.Image.from_icon_name ("media-playback-pause-symbolic");
             pause_icon.set_pixel_size (18);
             var pause_label = new Gtk.Label ("Pause");
-            pause_label.add_css_class ("camera-btn-label");
             pause_box.append (pause_icon);
             pause_box.append (pause_label);
             btn_pause.set_child (pause_box);
-            btn_pause.set_css_classes ({ "pill", "camera-pause-btn" });
+            btn_pause.set_css_classes ({ "pill" });
             btn_pause.set_tooltip_text ("Pause / Resume");
             btn_pause.set_sensitive (false);
 
@@ -392,11 +397,10 @@ namespace RecGo {
             var stop_icon = new Gtk.Image.from_icon_name ("media-playback-stop-symbolic");
             stop_icon.set_pixel_size (18);
             var stop_label = new Gtk.Label ("Stop");
-            stop_label.add_css_class ("camera-btn-label");
             stop_box.append (stop_icon);
             stop_box.append (stop_label);
             btn_stop.set_child (stop_box);
-            btn_stop.set_css_classes ({ "pill", "camera-stop-btn" });
+            btn_stop.set_css_classes ({ "pill" });
             btn_stop.set_tooltip_text ("Stop & Save Recording");
             btn_stop.set_sensitive (false);
 
@@ -414,12 +418,11 @@ namespace RecGo {
             var prev_icon = new Gtk.Image.from_icon_name ("video-display-symbolic");
             prev_icon.set_pixel_size (18);
             var prev_label = new Gtk.Label ("Select Source");
-            prev_label.add_css_class ("camera-btn-label");
             prev_box.append (prev_icon);
             prev_box.append (prev_label);
             btn_preview_screen.set_child (prev_box);
-            btn_preview_screen.set_css_classes ({ "pill", "camera-preview-btn" });
-            btn_preview_screen.set_tooltip_text ("Select Desktop or Window to Preview (ScreenCast)");
+            btn_preview_screen.set_css_classes ({ "pill" });
+            btn_preview_screen.set_tooltip_text ("Select Monitor(s) or Window to Preview (ScreenCast)");
 
             var left_status_box = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 12);
             left_status_box.append (osd_box);
@@ -444,7 +447,19 @@ namespace RecGo {
             size_box.append (size_scale);
             action_bar.pack_end (size_box);
 
-            toolbar_view.add_bottom_bar (action_bar);
+            record_page.append (action_bar);
+
+            var rec_view_page = view_stack.add_titled (record_page, "record", "Record");
+            rec_view_page.set_icon_name ("media-record-symbolic");
+
+            editor_view = new EditorView (settings);
+            editor_view.toast_requested.connect ((msg) => {
+                toast_overlay.add_toast (new Adw.Toast (msg));
+            });
+            var edit_view_page = view_stack.add_titled (editor_view, "edit", "Edit");
+            edit_view_page.set_icon_name ("video-display-symbolic");
+
+            toolbar_view.set_content (view_stack);
             toast_overlay.set_child (toolbar_view);
             set_content (toast_overlay);
 
@@ -592,13 +607,8 @@ namespace RecGo {
                         settings.set_string ("container-format", Gst.get_extension_for_container (c.container));
                         toast_overlay.add_toast (new Adw.Toast ("Active encoder: %s".printf (c.display_name)));
                         status_label.set_text ("Encoder: %s".printf (c.display_name));
-                        win_title.set_subtitle ("%s · %s".printf (gpu_summary, c.display_name));
+                        win_title.set_subtitle (c.display_name);
                     }
-                });
-                dialog.countdown_changed.connect ((secs, custom_secs) => {
-                    settings.set_uint ("countdown-seconds", secs);
-                    settings.set_uint ("custom-countdown-seconds", custom_secs);
-                    sync_countdown_dropdown (secs);
                 });
                 dialog.devices_selection_changed.connect (() => {
                     if (!is_recording && cam_toggle.get_active ()) {
@@ -705,6 +715,15 @@ namespace RecGo {
         }
 
         private void connect_ui_signals () {
+            source_dropdown.notify["selected"].connect (() => {
+                uint32 target_type = (source_dropdown.get_selected () == 0) ? 1 : 2;
+                if (active_session != null && active_session.source_type != target_type) {
+                    stop_screen_preview ();
+                    active_session = null;
+                    status_label.set_text ("Source type changed — click Select Source");
+                }
+            });
+
             layout_dropdown.notify["selected"].connect (() => {
                 uint sel = layout_dropdown.get_selected ();
                 preview.layout = (Gst.LayoutPreset) sel;
@@ -814,6 +833,9 @@ namespace RecGo {
             mic_toggle.toggled.connect (() => {
                 bool on = mic_toggle.get_active ();
                 settings.set_boolean ("mic-enabled", on);
+                if (is_recording && recorder != null) {
+                    recorder.set_mic_muted (!on);
+                }
                 toast_overlay.add_toast (new Adw.Toast (on ? "Microphone enabled" : "Microphone muted"));
             });
 
@@ -880,7 +902,7 @@ namespace RecGo {
             for (uint i = 0; i < available.length; i++) {
                 unowned var dev = available.get (i);
                 foreach (unowned string id in saved) {
-                    if (dev.id == id) {
+                    if (id != "none" && dev.id == id) {
                         result.add (dev.copy ());
                         break;
                     }
@@ -927,28 +949,48 @@ namespace RecGo {
         }
 
         private void stop_screen_preview () {
-            if (screen_preview_feed != null) {
-                screen_preview_feed.stop ();
-                screen_preview_feed = null;
+            for (uint i = 0; i < screen_preview_feeds.length; i++) {
+                screen_preview_feeds.get (i).stop ();
+            }
+            screen_preview_feeds.remove_range (0, screen_preview_feeds.length);
+            preview.clear_screen_textures ();
+        }
+
+        private void start_screen_previews_from_session (CaptureSession session) {
+            stop_screen_preview ();
+            preview.set_screen_count (session.streams.length);
+            for (uint i = 0; i < session.streams.length; i++) {
+                uint idx = i;
+                unowned var st = session.streams.get (i);
+                try {
+                    var feed = Gst.PreviewFeed.new_screen (session.fd, st.node_id);
+                    if (feed != null) {
+                        feed.frame_ready.connect ((tex) => {
+                            preview.set_screen_texture_at (idx, tex);
+                        });
+                        screen_preview_feeds.add (feed);
+                    }
+                } catch (GLib.Error e) {
+                    warning ("Screen preview error (%u): %s", st.node_id, e.message);
+                }
             }
         }
 
         private async void select_screen_source () {
             uint32 source_type = (source_dropdown.get_selected () == 0) ? 1 : 2;
-            status_label.set_text ("Selecting desktop or window for live preview...");
+            status_label.set_text ("Selecting monitor(s) or window for live preview...");
             try {
-                var stream = yield PortalClient.start_screencast (source_type);
-                stop_screen_preview ();
-                var feed = Gst.PreviewFeed.new_screen (stream.fd, stream.node_id);
-                if (feed != null) {
-                    feed.frame_ready.connect ((tex) => {
-                        preview.set_screen_texture (tex);
-                    });
-                    screen_preview_feed = feed;
+                var session = yield PortalClient.start_screencast (source_type, true);
+                active_session = session;
+                start_screen_previews_from_session (session);
+                if (session.streams.length > 1) {
+                    status_label.set_text ("Multi-screen preview active (%u displays)".printf (session.streams.length));
+                    toast_overlay.add_toast (new Adw.Toast ("Multi-screen preview active (%u)".printf (session.streams.length)));
+                } else {
+                    unowned var s0 = session.streams.get (0);
+                    status_label.set_text ("Live preview active (%dx%d)".printf (s0.width, s0.height));
+                    toast_overlay.add_toast (new Adw.Toast ("Live preview active"));
                 }
-                active_stream = stream;
-                status_label.set_text ("Live desktop preview active (%dx%d)".printf (stream.width, stream.height));
-                toast_overlay.add_toast (new Adw.Toast ("Live desktop preview active"));
             } catch (GLib.Error e) {
                 status_label.set_text ("Screen selection cancelled");
             }
@@ -1054,12 +1096,13 @@ namespace RecGo {
             string ts = now.format ("%Y-%m-%d_%H-%M-%S") ?? "output";
             string ext = Gst.get_extension_for_container (container);
             string out_path = GLib.Path.build_filename (videos_dir, "RecGo-%s.%s".printf (ts, ext));
+            last_saved_path = out_path;
 
-            if (layout != Gst.LayoutPreset.CAMERA_ONLY && active_stream == null) {
+            if (layout != Gst.LayoutPreset.CAMERA_ONLY && active_session == null) {
                 status_label.set_text ("Requesting screen access...");
                 uint32 source_type = (source_dropdown.get_selected () == 0) ? 1 : 2;
                 try {
-                    active_stream = yield PortalClient.start_screencast (source_type);
+                    active_session = yield PortalClient.start_screencast (source_type, true);
                 } catch (GLib.Error e) {
                     status_label.set_text ("Screen selection cancelled or failed");
                     toast_overlay.add_toast (new Adw.Toast ("ScreenCast portal: %s".printf (e.message)));
@@ -1081,11 +1124,17 @@ namespace RecGo {
 
             var mics = resolve_selected_devices ("enabled-microphones", device_manager.get_microphones (), true);
 
+            var screen_streams = new GLib.GenericArray<Gst.ScreenStream> ();
+            if (layout != Gst.LayoutPreset.CAMERA_ONLY && active_session != null) {
+                for (uint i = 0; i < active_session.streams.length; i++) {
+                    unowned var st = active_session.streams.get (i);
+                    screen_streams.add (new Gst.ScreenStream (active_session.fd, st.node_id, (uint) st.width, (uint) st.height));
+                }
+            }
+
             Gst.RecordConfig cfg = {};
-            cfg.screen_fd = (active_stream != null) ? active_stream.fd : -1;
-            cfg.screen_node_id = (active_stream != null) ? active_stream.node_id : 0;
-            cfg.screen_width = (active_stream != null) ? (uint) active_stream.width : 1920;
-            cfg.screen_height = (active_stream != null) ? (uint) active_stream.height : 1080;
+            cfg.screen_fd = -1;
+            cfg.screen_streams = screen_streams;
             cfg.cameras = cameras;
             cfg.microphones = mics;
             cfg.mic_enabled = mic_toggle.get_active ();
@@ -1178,6 +1227,7 @@ namespace RecGo {
         }
 
         private void on_recorder_stopped () {
+            string saved_path = (recorder != null) ? recorder.get_output_path () : last_saved_path;
             recorder = null;
             is_recording = false;
             is_paused = false;
@@ -1199,22 +1249,20 @@ namespace RecGo {
             if (cam_toggle.get_active ()) {
                 start_camera_previews ();
             }
-            if (active_stream != null) {
-                try {
-                    var feed = Gst.PreviewFeed.new_screen (active_stream.fd, active_stream.node_id);
-                    if (feed != null) {
-                        feed.frame_ready.connect ((tex) => {
-                            preview.set_screen_texture (tex);
-                        });
-                        screen_preview_feed = feed;
-                    }
-                } catch (GLib.Error e) {
-                    warning ("Failed to restore screen preview: %s", e.message);
-                }
+            if (active_session != null) {
+                start_screen_previews_from_session (active_session);
             }
 
             status_label.set_text ("Recording saved to Videos folder");
-            toast_overlay.add_toast (new Adw.Toast ("Video successfully saved to Videos folder"));
+            var toast = new Adw.Toast ("Video saved to Videos folder");
+            if (saved_path != "") {
+                editor_view.add_and_select_clip (saved_path);
+                toast.set_button_label ("Edit");
+                toast.button_clicked.connect (() => {
+                    view_stack.set_visible_child_name ("edit");
+                });
+            }
+            toast_overlay.add_toast (toast);
             control_state_changed ();
         }
 
@@ -1223,18 +1271,12 @@ namespace RecGo {
                 if (is_recording) {
                     if (!is_paused) {
                         elapsed_seconds++;
-                        uint hrs = (uint) (elapsed_seconds / 3600);
-                        uint mins = (uint) ((elapsed_seconds % 3600) / 60);
-                        uint secs = (uint) (elapsed_seconds % 60);
-                        osd_text.set_text ("REC  %02u:%02u:%02u".printf (hrs, mins, secs));
-                        osd_dot.set_css_classes ({ "camera-osd-dot", "recording" });
-                    } else {
-                        uint hrs = (uint) (elapsed_seconds / 3600);
-                        uint mins = (uint) ((elapsed_seconds % 3600) / 60);
-                        uint secs = (uint) (elapsed_seconds % 60);
-                        osd_text.set_text ("PAUSE  %02u:%02u:%02u".printf (hrs, mins, secs));
-                        osd_dot.set_css_classes ({ "camera-osd-dot", "paused" });
                     }
+                    uint hrs = (uint) (elapsed_seconds / 3600);
+                    uint mins = (uint) ((elapsed_seconds % 3600) / 60);
+                    uint secs = (uint) (elapsed_seconds % 60);
+                    osd_text.set_text ("%s  %02u:%02u:%02u".printf (is_paused ? "PAUSE" : "REC", hrs, mins, secs));
+                    osd_dot.set_css_classes ({ "camera-osd-dot", is_paused ? "paused" : "recording" });
                     control_state_changed ();
                 }
                 return GLib.Source.CONTINUE;

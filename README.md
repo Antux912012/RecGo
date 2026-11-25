@@ -65,6 +65,18 @@
 - **Performance Profiles:** Choose *Older Hardware / Power Saver (720p)*, *Balanced*, or *High Quality* with selectable `24` / `30` / `60` FPS targets and automatic GPU-to-CPU encoder fallback.
 - **Flatpak Schema Resilience (`SafeSettings`):** Graceful fallback to default schema values when launched inside Flatpak sandboxes with older compiled GSettings schemas.
 
+### 🖥️ Multi-Screen, Cam + Window & Multi-Microphone
+- **Multi-Screen Recording:** Select multiple monitors via XDG Desktop Portal (`multiple: true`) and composite them automatically in a clean grid/row with live multi-display preview.
+- **Cam + Window App Recording:** Record any application window with your webcam overlay (`Desktop + PiP` or `Side by Side`), with aspect-ratio preservation (`add-borders` / dynamic GL caps probe) so window resizes never stretch or distort.
+- **Multi-Microphone Mixer & Live Mute:** Mix multiple microphones via GStreamer `audiomixer` (`48 kHz` synchronized) with live mute/unmute during active recordings.
+
+### ✂️ Simplified In-App Edit Mode (Kdenlive-Inspired)
+- Switch between **Record** and **Edit** in the HeaderBar (or click **Edit** directly from the saved-recording toast).
+- **Project Bin, Preview Monitor & V1/A1 Timeline:** Scrub the playhead, set **In / Out** trim points, mark **Split** points, and export trimmed videos using your active hardware/software encoder.
+
+### 🎨 Bundled Papirus Symbolic Icons
+- All symbolic UI icons are bundled in GResource (`/io/github/Antux912012/RecGo/icons/papirus`) so the interface renders consistently regardless of the host GNOME icon theme.
+
 ### 📐 Layout Presets
 - **Desktop + Webcam PiP:** Picture-in-picture recording with customizable webcam position and scale.
 - **Side by Side (50/50 Split):** Split-screen recording ideal for presentations and tutorials.
@@ -74,7 +86,7 @@
 ### ⚡ Hardware Acceleration & Pipelines
 - **Direct Zero-Copy GPU Rendering:** Leverages GTK4 GSK GPU snapshotting and GStreamer hardware postprocessing.
 - **PipeWire & XDG Desktop Portal:** Fully sandboxed Wayland desktop capture using `org.freedesktop.portal.ScreenCast`.
-- **Fast-Start MP4 Finalization:** Automatic `moov` atom header positioning and stream EOS synchronization for instant video playback.
+- **Fragmented MP4 Finalization:** Streamable fragmented MP4 (`fragment-duration=1000`) and EOS synchronization for reliable video playback.
 
 ### ℹ️ HIG-Compliant About Dialog
 - Accessible via the top HeaderBar (`help-about-symbolic`).
@@ -87,7 +99,7 @@
 
 ### Standalone Flatpak, Debian, Fedora RPM & AUR
 
-RecGo is distributed via [GitHub Releases](https://github.com/Antux912012/RecGo/releases) and **FlatPark** as `.flatpak`, `.deb`, `.rpm`, and AUR `PKGBUILD`:
+RecGo is distributed via [GitHub Releases](https://github.com/Antux912012/RecGo/releases) as `.flatpak`, `.deb`, `.rpm`, and AUR `PKGBUILD`:
 
 ```bash
 # Install the Flatpak bundle locally
@@ -112,11 +124,12 @@ RecGo includes an automated Podman build harness to guarantee clean, reproducibl
 git clone https://github.com/Antux912012/RecGo.git
 cd RecGo
 
-# Verify compilation inside the container
-./build-in-podman.sh check
+# Setup and build inside the container
+./build-in-podman.sh setup
+./build-in-podman.sh build
 
-# Build release binary inside the container
-./build-in-podman.sh build --release
+# Run unit tests inside the container
+./build-in-podman.sh test
 
 # Package into a standalone Flatpak bundle
 ./package-flatpak.sh
@@ -132,18 +145,29 @@ RecGo/
 │   ├── icons/                          # Multi-resolution icons and SVG
 │   ├── io.github.Antux912012.RecGo.desktop.in # Desktop entry file
 │   ├── io.github.Antux912012.RecGo.gschema.xml # GSettings schema
-│   └── io.github.Antux912012.RecGo.metainfo.xml # AppStream metadata
+│   ├── io.github.Antux912012.RecGo.metainfo.xml # AppStream metadata
+│   ├── recgo.gresource.xml             # Bundled CSS and symbolic icons
+│   └── style.css                       # Application stylesheet
 ├── src/
-│   ├── pipeline/
-│   │   ├── codecs.rs                   # Hardware encoder detection (VA-API/Vulkan/NVENC)
-│   │   └── compositor.rs               # GStreamer pipelines & live capture
-│   ├── portal/
-│   │   └── screencast.rs               # PipeWire & XDG Desktop Portal integration
-│   ├── ui/
-│   │   ├── preferences.rs              # Preferences dialog & encoder settings
-│   │   └── preview.rs                  # Interactive GTK4 preview canvas & shapes
-│   ├── main.rs                         # Application entrypoint
-│   └── window.rs                       # Main window, HeaderBar, and Action Bar
+│   ├── gst/
+│   │   ├── recgo-codecs.c/.h           # Hardware encoder detection (VA-API/Vulkan/NVENC)
+│   │   ├── recgo-devices.c/.h          # PipeWire / V4L2 / PulseAudio device manager
+│   │   ├── recgo-editor.c/.h           # GStreamer non-blocking trim/export pipeline
+│   │   ├── recgo-preview.c/.h          # Live GStreamer -> GdkTexture preview bridge
+│   │   ├── recgo-recorder.c/.h         # GStreamer multi-input compositing & recording
+│   │   ├── recgo-video-fx.c/.h         # Webcam mask & image FX pad probe
+│   │   └── recgo-gst.vapi              # Vala bindings for recgo-gst C core
+│   ├── application.vala                # Adw.Application, D-Bus control & shortcuts
+│   ├── editor-view.vala                # Kdenlive-inspired Edit Mode view & transport
+│   ├── main.vala                       # Application entrypoint
+│   ├── portal.vala                     # XDG Desktop Portal ScreenCast & GlobalShortcuts
+│   ├── preferences-dialog.vala         # Preferences dialog & device selection
+│   ├── preview-widget.vala             # Interactive GTK4 preview canvas & shapes
+│   ├── safe-settings.vala              # Resilient GSettings wrapper
+│   ├── timeline-widget.vala            # V1/A1 timeline with playhead, trim & split
+│   └── window.vala                     # Main window, HeaderBar, and Action Bar
+├── tests/
+│   └── test-gst.c                      # GStreamer core unit tests
 ├── build-in-podman.sh                  # Containerized build script
 ├── package-flatpak.sh                  # Flatpak bundle packager
 ├── LICENSE                             # GNU General Public License v3.0

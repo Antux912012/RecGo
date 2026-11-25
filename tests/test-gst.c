@@ -1,6 +1,7 @@
 #include "recgo-codecs.h"
 #include "recgo-devices.h"
 #include "recgo-video-fx.h"
+#include "recgo-editor.h"
 #include <gst/gst.h>
 #include <assert.h>
 #include <string.h>
@@ -350,6 +351,34 @@ test_compositor_mask_integration (void)
     g_object_unref (fx);
 }
 
+static void
+test_editor_lifecycle_and_validation (void)
+{
+    RecGoEditor *ed = recgo_editor_new ();
+    g_assert_nonnull (ed);
+
+    RecGoEditSegment seg = { 0, 1000 };
+    GError *err = NULL;
+
+    /* Reject identical input/output path */
+    gboolean ok = recgo_editor_export_async (ed, "/tmp/in.mp4", "/tmp/in.mp4",
+                                             &seg, 1, RECGO_CODEC_H264, RECGO_CONTAINER_MP4, &err);
+    g_assert_false (ok);
+    g_assert_nonnull (err);
+    g_clear_error (&err);
+
+    /* Reject invalid control characters / quotes in path */
+    ok = recgo_editor_export_async (ed, "/tmp/in\".mp4", "/tmp/out.mp4",
+                                    &seg, 1, RECGO_CODEC_H264, RECGO_CONTAINER_MP4, &err);
+    g_assert_false (ok);
+    g_assert_nonnull (err);
+    g_clear_error (&err);
+
+    /* Cancel when idle is a safe no-op */
+    recgo_editor_cancel (ed);
+    g_object_unref (ed);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -363,6 +392,7 @@ main (int argc, char **argv)
     g_test_add_func ("/recgo/video_fx_image_enhancements", test_video_fx_image_enhancements);
     g_test_add_func ("/recgo/video_fx_performance_budget", test_video_fx_performance_budget);
     g_test_add_func ("/recgo/compositor_mask_integration", test_compositor_mask_integration);
+    g_test_add_func ("/recgo/editor_lifecycle_and_validation", test_editor_lifecycle_and_validation);
 
     return g_test_run ();
 }

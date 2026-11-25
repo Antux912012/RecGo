@@ -15,6 +15,7 @@ namespace RecGo {
         public signal void overlay_changed ();
 
         private Gdk.Texture? screen_texture = null;
+        private GLib.GenericArray<Gdk.Texture?> screen_textures = new GLib.GenericArray<Gdk.Texture?> ();
         private GLib.GenericArray<Gdk.Texture?> webcam_textures = new GLib.GenericArray<Gdk.Texture?> ();
 
         private double drag_start_x = 0.76;
@@ -82,6 +83,38 @@ namespace RecGo {
 
         public void set_screen_texture (Gdk.Texture? tex) {
             screen_texture = tex;
+            screen_textures.remove_range (0, screen_textures.length);
+            if (tex != null) {
+                screen_textures.add (tex);
+            }
+            queue_draw ();
+        }
+
+        public void set_screen_count (uint count) {
+            screen_texture = null;
+            while (screen_textures.length < count) {
+                screen_textures.add (null);
+            }
+            if (screen_textures.length > count) {
+                screen_textures.remove_range (count, screen_textures.length - count);
+            }
+            queue_draw ();
+        }
+
+        public void set_screen_texture_at (uint index, Gdk.Texture? tex) {
+            while (screen_textures.length <= index) {
+                screen_textures.add (null);
+            }
+            screen_textures.set (index, tex);
+            if (index == 0) {
+                screen_texture = tex;
+            }
+            queue_draw ();
+        }
+
+        public void clear_screen_textures () {
+            screen_texture = null;
+            screen_textures.remove_range (0, screen_textures.length);
             queue_draw ();
         }
 
@@ -170,13 +203,51 @@ namespace RecGo {
             }
         }
 
+        private void draw_texture_contain (Gtk.Snapshot snapshot, Gdk.Texture tex, Graphene.Rect bounds) {
+            float tex_w = (float) tex.get_width ();
+            float tex_h = (float) tex.get_height ();
+            if (tex_w <= 0.0f || tex_h <= 0.0f)
+                return;
+            float scale = float.min (bounds.size.width / tex_w, bounds.size.height / tex_h);
+            float draw_w = tex_w * scale;
+            float draw_h = tex_h * scale;
+            float draw_x = bounds.origin.x + (bounds.size.width - draw_w) / 2.0f;
+            float draw_y = bounds.origin.y + (bounds.size.height - draw_h) / 2.0f;
+            snapshot.append_texture (tex, Graphene.Rect ().init (draw_x, draw_y, draw_w, draw_h));
+        }
+
         private void draw_screen_stage (Gtk.Snapshot snapshot, float x, float y, float w, float h) {
             var rect = Graphene.Rect ().init (x, y, w, h);
             var rounded = Gsk.RoundedRect ().init_from_rect (rect, 12.0f);
 
             snapshot.push_rounded_clip (rounded);
-            if (screen_texture != null) {
-                snapshot.append_texture (screen_texture, rect);
+            if (is_recording && screen_texture != null) {
+                snapshot.append_color (rgba (0.04f, 0.05f, 0.07f, 1.0f), rect);
+                draw_texture_contain (snapshot, screen_texture, rect);
+            } else if (screen_textures.length > 1) {
+                snapshot.append_color (rgba (0.04f, 0.05f, 0.07f, 1.0f), rect);
+                uint n = screen_textures.length;
+                uint cols = 2;
+                uint rows = (n + cols - 1) / cols;
+                float gap = 6.0f;
+                float cell_w = (w - gap * (float) (cols - 1)) / (float) cols;
+                float cell_h = (h - gap * (float) (rows - 1)) / (float) rows;
+                for (uint i = 0; i < n; i++) {
+                    uint c = i % cols;
+                    uint r = i / cols;
+                    var cell = Graphene.Rect ().init (x + (float) c * (cell_w + gap),
+                                                      y + (float) r * (cell_h + gap),
+                                                      cell_w, cell_h);
+                    Gdk.Texture? tex = screen_textures.get (i);
+                    if (tex != null) {
+                        draw_texture_contain (snapshot, tex, cell);
+                    } else {
+                        snapshot.append_color (rgba (0.11f, 0.14f, 0.19f, 1.0f), cell);
+                    }
+                }
+            } else if (screen_texture != null) {
+                snapshot.append_color (rgba (0.04f, 0.05f, 0.07f, 1.0f), rect);
+                draw_texture_contain (snapshot, screen_texture, rect);
             } else {
                 snapshot.append_color (rgba (0.11f, 0.14f, 0.19f, 1.0f), rect);
                 var top_bar = Graphene.Rect ().init (x, y, w, 26.0f);
@@ -376,8 +447,19 @@ namespace RecGo {
             var left_rounded = Gsk.RoundedRect ().init_from_rect (left_rect, 12.0f);
 
             snapshot.push_rounded_clip (left_rounded);
-            if (screen_texture != null) {
-                snapshot.append_texture (screen_texture, left_rect);
+            if (screen_textures.length > 1) {
+                snapshot.append_color (rgba (0.04f, 0.05f, 0.07f, 1.0f), left_rect);
+                float per_sh = (h - (float) (screen_textures.length - 1) * 6.0f) / (float) screen_textures.length;
+                for (uint i = 0; i < screen_textures.length; i++) {
+                    var cell = Graphene.Rect ().init (x, y + (float) i * (per_sh + 6.0f), half_w, per_sh);
+                    Gdk.Texture? stex = screen_textures.get (i);
+                    if (stex != null) {
+                        draw_texture_contain (snapshot, stex, cell);
+                    }
+                }
+            } else if (screen_texture != null) {
+                snapshot.append_color (rgba (0.04f, 0.05f, 0.07f, 1.0f), left_rect);
+                draw_texture_contain (snapshot, screen_texture, left_rect);
             } else {
                 snapshot.append_color (rgba (0.14f, 0.18f, 0.25f, 1.0f), left_rect);
             }

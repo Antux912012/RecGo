@@ -43,6 +43,7 @@ c_sources = files(
   'src/gst/recgo-video-fx.c',
   'src/gst/recgo-preview.c',
   'src/gst/recgo-recorder.c',
+  'src/gst/recgo-editor.c',
 )
 
 vala_sources = files(
@@ -53,6 +54,8 @@ vala_sources = files(
   'src/preview-widget.vala',
   'src/preferences-dialog.vala',
   'src/portal.vala',
+  'src/timeline-widget.vala',
+  'src/editor-view.vala',
 )
 
 executable(
@@ -89,6 +92,7 @@ test_gst = executable(
     'src/gst/recgo-codecs.c',
     'src/gst/recgo-devices.c',
     'src/gst/recgo-video-fx.c',
+    'src/gst/recgo-editor.c',
   ),
   include_directories: include_directories('src/gst'),
   dependencies: [gio_dep, gst_dep, gst_video_dep, m_dep],
